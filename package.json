@@ -1,0 +1,16 @@
+{
+  "name": "edentica",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "start:local": "powershell -NoProfile -File scripts/start-local.ps1",
+    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "backup": "node scripts/backup.mjs",
+    "check": "node scripts/check.mjs"
+  },
+  "engines": {
+    "node": ">=22.16"
+  }
+}

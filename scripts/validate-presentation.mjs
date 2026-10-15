@@ -1,0 +1,16 @@
+import {exportSlides} from '../src/presentations.mjs';
+import {pathToFileURL} from 'node:url';
+import {resolve,join} from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {mkdir} from 'node:fs/promises';
+const skill=process.env.PRESENTATIONS_SKILL_DIR||join(process.env.USERPROFILE,'.codex/plugins/cache/openai-primary-runtime/presentations/26.1011.11113/skills/presentations');
+const python=process.env.PYTHON_PATH||join(process.env.USERPROFILE,'.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe');
+const {finalizePresentation}=await import(pathToFileURL(join(skill,'container_tools/artifact_tool_utils.mjs')).href);
+const directory=resolve('data/presentation-qa');
+const finalDirectory=resolve('output/presentations-check');
+const runId=randomUUID();
+await mkdir(finalDirectory,{recursive:true});
+process.env.RUNTIME_NODE_MODULES ||= join(process.env.USERPROFILE,'.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules');
+const candidate=await exportSlides([{title:'Критическое мышление',text:'Проверяйте первоисточник, дату публикации и контекст. Уверенный тон автора не заменяет доказательства.',notes:''}],directory,{render:true});
+const result=await finalizePresentation({workspaceDir:resolve('.'),candidatePath:candidate.path,finalPath:join(finalDirectory,'validated-'+runId+'.pptx'),pythonExecutable:python,integrityValidatorPath:join(skill,'container_tools/inspect_presentation_package_integrity.py'),layoutValidatorPath:join(skill,'container_tools/inspect_presentation_layout_geometry.py'),layoutArgs:['--expected-slide-size-emu','12192000,6858000','--validate-heading-fit'],fontPolicy:{basis:'design',families:['Arial']},verifyArtifactToolImport:true,receiptPath:join(directory,'validation-'+runId+'.json')});
+console.log(JSON.stringify({finalPath:result.finalPath,receiptPath:join(directory,'validation-'+runId+'.json')}));

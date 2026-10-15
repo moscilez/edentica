@@ -1,0 +1,12 @@
+{"kind":"deck","id":"pr/hhruh2","name":"Deck"}
+{"kind":"layout","id":"ly/vmxs721g","editable":false,"name":"Master","type":"master"}
+{"kind":"layout","id":"ly/k3e1gfq1","editable":false,"name":"Title Slide","type":"title","placeholders":[{"name":"title","type":"title"},{"name":"subtitle","type":"subtitle"}]}
+{"kind":"layout","id":"ly/6tw3i9kv","editable":false,"name":"Section Header","type":"sectionHeader","placeholders":[{"name":"title","type":"title"}]}
+{"kind":"layout","id":"ly/hcnexcja","editable":false,"name":"Title and Body","type":"tx","placeholders":[{"name":"title","type":"title"},{"name":"body","type":"body"}]}
+{"kind":"layout","id":"ly/excnq147","editable":false,"name":"Title and Two Column","type":"twoColTx","placeholders":[{"name":"title","type":"title"},{"name":"Left column","type":"body"},{"name":"Right column","type":"body"}]}
+{"kind":"layout","id":"ly/l4bm94fu","editable":false,"name":"Title and One Column","type":"tx","placeholders":[{"name":"title","type":"title"},{"name":"body","type":"body"}]}
+{"kind":"layout","id":"ly/f69wfmlk","editable":false,"name":"Blank","type":"blank"}
+{"kind":"slide","id":"sl/s8vn15","slideIndex":0,"layout":{"id":"ly/f69wfmlk","name":"Blank"},"title":"Критическое мышление","textShapes":2,"backgroundColor":"rgba(244,247,245,1)"}
+{"kind":"textbox","id":"sh/54n69cni","slideIndex":0,"position":{"left":70,"top":70,"width":1140,"height":140},"text":"Критическое мышление","geometry":"rect","lineWidth":0,"style":{"fontSize":44,"typeface":"Aptos","color":"#203733","bold":true,"alignment":"left"}}
+{"kind":"textbox","id":"sh/i1cnyh47","slideIndex":0,"position":{"left":70,"top":230,"width":1140,"height":410},"text":"Проверяйте первоисточник, дату публикации и контекст. Уверенный тон автора не заменяет доказательства.","geometry":"rect","lineWidth":0,"style":{"fontSize":28,"typeface":"Aptos","color":"#36594B","alignment":"left"}}
+{"kind":"notes","id":"nt/s8vn15","slideIndex":0,"text":""}

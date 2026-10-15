@@ -1,0 +1,11 @@
+import {DatabaseSync} from 'node:sqlite';
+import {mkdirSync,existsSync} from 'node:fs';
+import {resolve,join} from 'node:path';
+const source=resolve(process.env.DATABASE_PATH||'data/edentica.sqlite');
+if(!existsSync(source))throw Error('Database not found');
+const directory=resolve('data/backups');mkdirSync(directory,{recursive:true});
+const target=join(directory,'edentica-'+new Date().toISOString().replace(/[:.]/g,'-')+'.sqlite');
+const db=new DatabaseSync(source);db.prepare('VACUUM INTO ?').run(target);db.close();
+const backup=new DatabaseSync(target,{readOnly:true});const result=backup.prepare('PRAGMA integrity_check').get();backup.close();
+if(result.integrity_check!=='ok')throw Error('Backup integrity check failed');
+console.log('Backup verified: '+target);
