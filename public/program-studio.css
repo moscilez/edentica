@@ -6,3 +6,5 @@
 .simple-editor{border:0;padding:20px 0}.simple-editor textarea{min-height:70px}.table-wrap input.topic-title{width:100%;min-width:150px;font-size:12px}.simple-editor label{font-weight:500}
 
 .section-note{font-size:12px;color:var(--muted)}
+
+.brand .brand-mark{display:block;width:36px;height:36px;flex-shrink:0}.brand>span{font-size:23px;letter-spacing:-.9px}.brand{gap:10px}
