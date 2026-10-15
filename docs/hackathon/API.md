@@ -1,5 +1,7 @@
 # Единый API агента
 
+API обслуживает Python/FastAPI, данные хранятся в PostgreSQL. `GET /api/health` возвращает `backend: "python"` и `database: "postgresql"`. Несовпадение версии при правке или согласовании возвращает HTTP 409. Пользовательский контракт `/api/agent` сохранён.
+
 Все операции нового агента доступны через `POST /api/agent`. Ответ JSON, кроме бинарного экспорта. Аутентификация — обычная сессия Edentica; `GET /api/agent` возвращает конфигурационный статус. Для POST передавайте `Content-Type: application/json` и `X-Edentica: 1`. При браузерном Origin он должен совпадать с адресом сервера. Host должен входить в ALLOWED_HOSTS или PUBLIC_URL. Сервер не открывает CORS.
 
 Для стенда проверки сначала зарегистрируйте пользователя или войдите через POST /api/auth/register или /api/auth/login и сохраните cookie session. Пример регистрации: `{"name":"Методист","email":"methodist@example.test","password":"ваш_пароль_не_короче_10_знаков"}`. Это общий механизм авторизации, а не навык агента.
