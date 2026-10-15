@@ -1,0 +1,10 @@
+# Local credentials and runtime state must never be added to Git.
+.env
+.env.*
+!.env.example
+node_modules/
+data/
+output/
+__pycache__/
+*.pyc
+.DS_Store

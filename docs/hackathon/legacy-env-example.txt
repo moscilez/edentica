@@ -1,0 +1,43 @@
+PORT=3000
+HOST=127.0.0.1
+DATABASE_PATH=data/edentica.sqlite
+# Local HTTP only; set COOKIE_SECURE=1 behind HTTPS
+COOKIE_SECURE=0
+PUBLIC_URL=http://localhost:3000
+# Additional allowed hostnames, comma-separated. localhost / loopback always allowed.
+ALLOWED_HOSTS=
+# Configure only on the server; do not commit real keys.
+OPENAI_API_KEY=
+OPENAI_MODEL=
+# Enter verified current rates for your selected model (USD / million tokens).
+AI_INPUT_USD_PER_MILLION=
+AI_OUTPUT_USD_PER_MILLION=
+# Daily per-user reservation budget (USD). Failed/cancelled jobs retain reservation.
+AI_DAILY_BUDGET_USD=
+AI_GLOBAL_DAILY_BUDGET_USD=
+# Optional Python executable with reportlab installed.
+PYTHON_PATH=
+# Optional Cyrillic TTF font. Windows defaults to Arial; Linux to DejaVu Sans.
+CERTIFICATE_FONT=
+# Exact user UUID granted administrator access. Copy your ID from Profile.
+# An unverified email address does not grant administrator rights.
+ADMIN_USER_ID=
+TTS_MODEL=
+TTS_VOICE=
+TTS_USD_PER_MILLION_CHARACTERS=
+HEYGEN_API_KEY=
+HEYGEN_STOCK_AVATAR_ID=
+HEYGEN_STOCK_VOICE_ID=
+HEYGEN_STOCK_RIGHTS_CONFIRMED=0
+VIDEO_USD_PER_MINUTE=
+# Optional installed @oai/artifact-tool node_modules directory for PPTX export.
+ARTIFACT_NODE_MODULES=
+
+# Hackathon studio (default). Set legacy only to inspect the old LMS.
+EDENTICA_MODE=hackathon
+# Copy an available model ID from your Cloud.ru catalogue; do not guess it.
+CLOUDRU_API_KEY=
+CLOUDRU_MODEL=
+# Optional RUB per 1 million tokens. Use the selected model's actual tariff.
+CLOUDRU_INPUT_RUB_PER_MILLION=
+CLOUDRU_OUTPUT_RUB_PER_MILLION=

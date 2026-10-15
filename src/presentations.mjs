@@ -24,6 +24,7 @@ export async function exportSlides(slides,outputDir,{render=false}={}){
  const {Presentation,PresentationFile}=await import(pathToFileURL(require.resolve('@oai/artifact-tool')).href);
  const deck=Presentation.create({slideSize:{width:1280,height:720}});
  for(const s of slides){const slide=deck.slides.add();slide.background.fill='#F4F7F5';
+  if(s.notes)slide.speakerNotes.text=s.notes;
   const title=slide.shapes.add({geometry:'textbox',position:{left:70,top:70,width:1140,height:140},fill:'none',line:{fill:'none',width:0}});title.text=s.title;title.text.style={typeface:'Arial',fontSize:s.title.length>100?32:44,bold:true,color:'#203733'};
   const body=slide.shapes.add({geometry:'textbox',position:{left:70,top:230,width:1140,height:410},fill:'none',line:{fill:'none',width:0}});body.text=s.text;body.text.style={typeface:'Arial',fontSize:28,color:'#36594B'};
  }

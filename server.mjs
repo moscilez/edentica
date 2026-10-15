@@ -16,10 +16,12 @@ import {migrateQuality,reviewStatus} from './src/quality.mjs';
 import {migrateMaterials,materialRoutes} from './src/materials.mjs';
 import {migrateReputation,awardLearningXP} from './src/reputation.mjs';
 import {normalizeQuestions,gradeAssessment,migrateAssessments,queueReview,reviewRoutes} from './src/assessments.mjs';
+import {configurePrograms} from './src/programs/service.mjs';
 const root=fileURLToPath(new URL('.',import.meta.url));
 if(existsSync(root+'.env')&&typeof process.loadEnvFile==='function')process.loadEnvFile(root+'.env');
 export function createApp(path=process.env.DATABASE_PATH||root+'data/edentica.sqlite',options={}) {
  const db=database(path), limits=new Map();
+ const hackathon=options.hackathon===true;
  db.function('unicode_lower',{deterministic:true},value=>String(value??'').normalize('NFKC').toLowerCase());
  migrateFeatures(db);
  migrateCommunity(db);
@@ -30,8 +32,9 @@ export function createApp(path=process.env.DATABASE_PATH||root+'data/edentica.sq
  migrateQuality(db);
  migrateEnrollmentSources(db);
  migrateModeration(db);
- const ai=configureAI(db,options.ai);
- const media=configureMedia(db,options.media);
+ const programs=configurePrograms(db,options.programs);
+ const ai=configureAI(db,hackathon?{env:{}}:options.ai);
+ const media=configureMedia(db,hackathon?{env:{}}:options.media);
  const assistant=configureAssistant(db,options.assistant);
  const all=(sql,...p)=>db.prepare(sql).all(...p), one=(sql,...p)=>db.prepare(sql).get(...p), run=(sql,...p)=>db.prepare(sql).run(...p);
  const fail=(message,status=400)=>{throw Object.assign(new Error(message),{status})};
@@ -51,9 +54,11 @@ export function createApp(path=process.env.DATABASE_PATH||root+'data/edentica.sq
    if(process.env.PUBLIC_URL)allowedHosts.add(new URL(process.env.PUBLIC_URL).hostname.toLowerCase());
    if(!allowedHosts.has(requestHost))fail('Недопустимый адрес сервера',403);
    const url=new URL(req.url,'http://localhost'), p=url.pathname;
+   if(hackathon&&(p==='/'||p==='/programs')){res.setHeader('Content-Type','text/html; charset=utf-8');res.end(readFileSync(root+'public/program-studio.html'));return}
+   if(hackathon&&/^\/api\/(ai|media|identity)(\/|$)/.test(p))fail('Этот провайдер отключён в режиме хакатона. Используйте Cloud.ru через /api/agent.',410);
    if(!p.startsWith('/api/')){const files={'/':'index.html','/app.js':'app.js','/assessment-editor.js':'assessment-editor.js','/enhanced-editor.js':'enhanced-editor.js','/assessment-player.js':'assessment-player.js','/features.js':'features.js','/community.js':'community.js','/course-assets.js':'course-assets.js','/media.js':'media.js','/assistant.js':'assistant.js','/materials.js':'materials.js','/style.css':'style.css'};if(/^\/c\/[a-z0-9-]+$/.test(p))files[p]='index.html';if(/^\/[a-z0-9-]+\.(js|css)$/.test(p)&&existsSync(root+'public/'+p.slice(1)))files[p]=p.slice(1);if(!files[p])fail('Не найдено',404);res.setHeader('Content-Type',p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':'text/html; charset=utf-8');res.end(readFileSync(root+'public/'+files[p]));return}
-   const readable=/^\/api\/admin\/courses\/[^/]+$/.test(p)||p==='/api/materials'||/^\/api\/materials\/[^/]+$/.test(p)||p==='/api/media/status'||/^\/api\/media\/[^/]+(?:\/audio)?$/.test(p)||/^\/api\/sites\/[a-z0-9-]+(?:\/theme.css)?$/.test(p)||['/api/profile','/api/organizations','/api/notifications','/api/identity','/api/admin'].includes(p)||/^\/api\/authors\/[^/]+$/.test(p)||/^\/api\/organizations\/[^/]+(?:\/report)?$/.test(p)||p==='/api/ai/status'||/^\/api\/ai\/jobs\/[^/]+$/.test(p)||/^\/api\/(health|me|dashboard|courses|leaderboards|favorites|skills)$/.test(p)||/^\/api\/courses\/[^/]+(?:\/(invitations|exam|reviews|discussion|analytics|history|quality|versions|website|presentation|media|grading))?$/.test(p)||/^\/api\/certificates\/[^/]+(?:\/pdf)?$/.test(p);
-   const writable=p==='/api/materials'||/^\/api\/materials\/[^/]+\/remove$/.test(p)||/^\/api\/grading\/[^/]+$/.test(p)||/^\/api\/media\/[^/]+\/cancel$/.test(p)||['/api/profile','/api/organizations','/api/organizations/accept','/api/notifications','/api/identity','/api/reports','/api/admin/moderate'].includes(p)||/^\/api\/authors\/[^/]+\/follow$/.test(p)||/^\/api\/organizations\/[^/]+\/(invite|assign|members|revoke-invite)$/.test(p)||/^\/api\/identity\/[^/]+\/revoke$/.test(p)||p==='/api/ai/jobs'||/^\/api\/ai\/jobs\/[^/]+\/cancel$/.test(p)||/^\/api\/auth\/(register|login|logout)$/.test(p)||p==='/api/courses'||/^\/api\/courses\/[^/]+\/(publish|enroll|invite|certificate|exam|reviews|discussion|favorite|restore|copy|website|presentation|media|tutor|copilot|apply-copilot|revoke-access|tutor-permission)$/.test(p)||/^\/api\/invitations\/(accept|revoke)$/.test(p)||/^\/api\/modules\/[^/]+\/attempt$/.test(p)||/^\/api\/certificates\/[^/]+\/revoke$/.test(p);
+   const readable=p==='/api/agent'||/^\/api\/admin\/courses\/[^/]+$/.test(p)||p==='/api/materials'||/^\/api\/materials\/[^/]+$/.test(p)||p==='/api/media/status'||/^\/api\/media\/[^/]+(?:\/audio)?$/.test(p)||/^\/api\/sites\/[a-z0-9-]+(?:\/theme.css)?$/.test(p)||['/api/profile','/api/organizations','/api/notifications','/api/identity','/api/admin'].includes(p)||/^\/api\/authors\/[^/]+$/.test(p)||/^\/api\/organizations\/[^/]+(?:\/report)?$/.test(p)||p==='/api/ai/status'||/^\/api\/ai\/jobs\/[^/]+$/.test(p)||/^\/api\/(health|me|dashboard|courses|leaderboards|favorites|skills)$/.test(p)||/^\/api\/courses\/[^/]+(?:\/(invitations|exam|reviews|discussion|analytics|history|quality|versions|website|presentation|media|grading))?$/.test(p)||/^\/api\/certificates\/[^/]+(?:\/pdf)?$/.test(p);
+   const writable=p==='/api/agent'||p==='/api/materials'||/^\/api\/materials\/[^/]+\/remove$/.test(p)||/^\/api\/grading\/[^/]+$/.test(p)||/^\/api\/media\/[^/]+\/cancel$/.test(p)||['/api/profile','/api/organizations','/api/organizations/accept','/api/notifications','/api/identity','/api/reports','/api/admin/moderate'].includes(p)||/^\/api\/authors\/[^/]+\/follow$/.test(p)||/^\/api\/organizations\/[^/]+\/(invite|assign|members|revoke-invite)$/.test(p)||/^\/api\/identity\/[^/]+\/revoke$/.test(p)||p==='/api/ai/jobs'||/^\/api\/ai\/jobs\/[^/]+\/cancel$/.test(p)||/^\/api\/auth\/(register|login|logout)$/.test(p)||p==='/api/courses'||/^\/api\/courses\/[^/]+\/(publish|enroll|invite|certificate|exam|reviews|discussion|favorite|restore|copy|website|presentation|media|tutor|copilot|apply-copilot|revoke-access|tutor-permission)$/.test(p)||/^\/api\/invitations\/(accept|revoke)$/.test(p)||/^\/api\/modules\/[^/]+\/attempt$/.test(p)||/^\/api\/certificates\/[^/]+\/revoke$/.test(p);
    if(req.method==='GET'&&!readable||req.method==='POST'&&!writable||req.method==='PATCH'&&!/^\/api\/courses\/[^/]+$/.test(p)||!['GET','POST','PATCH'].includes(req.method))fail('Метод не разрешён',405);
    if(req.method!=='GET') {if(req.headers.origin&&req.headers.origin!==`http://${req.headers.host}`&&req.headers.origin!==`https://${req.headers.host}`)fail('Запрос запрещён',403);if(req.headers['x-edentica']!=='1')fail('Запрос запрещён',403)}
    const ip=req.socket.remoteAddress, now=Date.now(), key=ip+(p.includes('/auth/')?':auth':':api');let lim=limits.get(key);if(!lim||lim.until<now){lim={n:0,until:now+60000};limits.set(key,lim)}if(++lim.n>(key.endsWith(':auth')?20:200))fail('Слишком много запросов',429);if(limits.size>10000)for(const [k,v]of limits)if(v.until<now)limits.delete(k);
@@ -61,6 +66,8 @@ export function createApp(path=process.env.DATABASE_PATH||root+'data/edentica.sq
    const token=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith('session='))?.slice(8);
    const u=token?one('SELECT u.id,u.name,u.email FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token=? AND s.expires>? AND NOT EXISTS(SELECT 1 FROM user_suspensions b WHERE b.user_id=u.id)',hashToken(token),now):null;
    const login=()=>{if(!u)fail('Войдите в аккаунт',401);return u};
+   if(await programs.routes({p,req,body,u,send,login,required,res}))return;
+   if(hackathon&&/^\/api\/courses\/[^/]+\/(copilot|apply-copilot|tutor|media)$/.test(p))fail('Зарубежные AI-провайдеры отключены в режиме хакатона',410);
    if(p==='/api/auth/register'||p==='/api/auth/login') {
     const email=required(body.email).toLowerCase(), password=required(body.password,128);if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))fail('Некорректный email');let user=one('SELECT * FROM users WHERE email=?',email);
     if(p.endsWith('register')){if(password.length<10)fail('Пароль должен содержать минимум 10 символов');if(user)fail('Email уже зарегистрирован');const salt=randomBytes(16).toString('hex');user={id:randomUUID(),name:required(body.name,100),email};run('INSERT INTO users(id,name,email,password) VALUES(?,?,?,?)',user.id,user.name,email,salt+':'+scryptSync(password,salt,64).toString('hex'))}
@@ -106,6 +113,6 @@ export function createApp(path=process.env.DATABASE_PATH||root+'data/edentica.sq
    if(p.startsWith('/api/certificates/')){const cert=one('SELECT ct.id,ct.name,ct.created,c.title,u.name author FROM certificates ct JOIN courses c ON c.id=ct.course_id JOIN users u ON u.id=c.owner WHERE ct.id=?',p.split('/')[3]);if(!cert)fail('Сертификат не найден',404);const revoked=one('SELECT reason FROM certificate_revocations WHERE certificate_id=?',cert.id);send({...cert,revoked:!!revoked,reason:revoked?.reason});return}
    fail('Не найдено',404);
   }catch(e){send({error:e.status?e.message:'Внутренняя ошибка сервера'},e.status||500);if(!e.status)console.error('Request failed:',e.code||e.name)}
- });server.requestTimeout=30000;server.headersTimeout=10000;server.maxRequestsPerSocket=100;server.on('close',()=>{ai.close();media.close()});return {server,db};
+ });server.requestTimeout=30000;server.headersTimeout=10000;server.maxRequestsPerSocket=100;server.on('close',()=>{programs.close();ai.close();media.close()});return {server,db};
 }
-if(process.argv[1]===fileURLToPath(import.meta.url)){const {server}=createApp();server.listen(Number(process.env.PORT)||3000,process.env.HOST||'127.0.0.1',()=>console.log('Edentica: http://localhost:'+(process.env.PORT||3000)))}
+if(process.argv[1]===fileURLToPath(import.meta.url)){const {server}=createApp(undefined,{hackathon:process.env.EDENTICA_MODE!=='legacy'});server.listen(Number(process.env.PORT)||3000,process.env.HOST||'127.0.0.1',()=>console.log('Edentica: http://localhost:'+(process.env.PORT||3000)))}
