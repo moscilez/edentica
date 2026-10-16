@@ -43,7 +43,7 @@ test('Единый API: уточнение → каркас → согласов
  const req=async(action,data={},otherCookie=cookie)=>{const r=await fetch(base+'/api/agent',{method:'POST',headers:{'Content-Type':'application/json','X-Edentica':'1',Cookie:otherCookie||''},body:JSON.stringify({action,...data})});return {status:r.status,data:r.headers.get('content-type')?.includes('json')?await r.json():await r.text()}};
  const wait=async id=>{for(let i=0;i<100;i++){const r=await req('get',{id});if(r.data.job?.state!=='running')return r.data;await new Promise(r=>setTimeout(r,10))}throw Error('worker timeout')};
  try{
-  assert.equal((await fetch(base)).status,200);assert.match(await(await fetch(base)).text(),/Студия образовательных программ/);
+  assert.equal((await fetch(base)).status,200);assert.match(await(await fetch(base)).text(),/<title>Edentica<\/title>/);
   assert.equal((await req('list')).status,401);
   const auth=await fetch(base+'/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json','X-Edentica':'1'},body:JSON.stringify({name:'Методист',email:'methodist@test.invalid',password:'password-test-long'})});cookie=auth.headers.get('set-cookie').split(';')[0];
   const created=await req('create',{request:'Курс Python на 16 часов'}),id=created.data.id;assert.equal(created.status,201);

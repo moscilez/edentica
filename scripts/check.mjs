@@ -6,4 +6,4 @@ function scan(directory){for(const entry of readdirSync(directory,{withFileTypes
 for(const directory of ['src','public','scripts','tests'])scan(directory);files.push('server.mjs');
 for(const file of files){const r=spawnSync(process.execPath,['--check',resolve(file)],{stdio:'inherit',windowsHide:true});if(r.status!==0)process.exit(r.status||1)}
 console.log('JavaScript syntax checked: '+files.length+' files');
-const r=spawnSync(process.execPath,['--test','--test-concurrency=1',...files.filter(f=>f.endsWith('.test.mjs'))],{stdio:'inherit',windowsHide:true});process.exitCode=r.status??1;
+const r=spawnSync(process.execPath,['scripts/python.mjs','-m','pytest','-q','tests_python'],{stdio:'inherit',windowsHide:true});process.exitCode=r.status??1;

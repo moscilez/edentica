@@ -1,13 +1,16 @@
 {
   "name": "edentica",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server.mjs",
+    "start": "node scripts/python.mjs -m backend",
     "start:local": "powershell -NoProfile -File scripts/start-local.ps1",
-    "test": "node --test --test-concurrency=1 tests/*.test.mjs",
-    "backup": "node scripts/backup.mjs",
+    "test": "node scripts/python.mjs -m pytest -q tests_python",
+    "test:legacy": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "db:setup": "node scripts/python.mjs scripts/setup-postgres.py",
+    "db:migrate": "node scripts/python.mjs scripts/migrate-postgres.py",
+    "backup": "node scripts/python.mjs scripts/backup-postgres.py",
     "check": "node scripts/check.mjs"
   },
   "engines": {

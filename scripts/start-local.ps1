@@ -2,6 +2,8 @@
 $projectPath = Split-Path -Parent $PSScriptRoot
 $siteUrl = 'http://localhost:3000'
 $nodePath = (Get-Command node.exe).Source
+$pythonPath = Join-Path $projectPath '.venv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $pythonPath)) { throw 'Создайте .venv и установите requirements.txt' }
 function Test-EdenticaHealth {
     & $nodePath (Join-Path $PSScriptRoot 'health.mjs') $siteUrl
     return $LASTEXITCODE -eq 0
@@ -21,7 +23,7 @@ New-Item -ItemType Directory -Path $dataPath -Force | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $outputPath = Join-Path $dataPath "server-$stamp.log"
 $errorPath = Join-Path $dataPath "server-$stamp-error.log"
-$serverProcess = Start-Process -FilePath $nodePath -ArgumentList 'server.mjs' -WorkingDirectory $projectPath -WindowStyle Hidden -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath -PassThru
+$serverProcess = Start-Process -FilePath $pythonPath -ArgumentList '-m','backend' -WorkingDirectory $projectPath -WindowStyle Hidden -RedirectStandardOutput $outputPath -RedirectStandardError $errorPath -PassThru
 Write-Host "Edentica: процесс $($serverProcess.Id) запускается"
 for ($attempt = 0; $attempt -lt 20; $attempt++) {
     if ($serverProcess.HasExited) { throw "Сервер завершился. Проверьте $errorPath" }

@@ -1,1 +1,1 @@
-try{const response=await fetch((process.argv[2]||'http://localhost:3000')+'/api/health',{signal:AbortSignal.timeout(2000)});const health=await response.json();process.exitCode=response.ok&&health.service==='edentica'?0:1}catch{process.exitCode=1}
+try{const response=await fetch((process.argv[2]||'http://localhost:3000')+'/api/health',{signal:AbortSignal.timeout(2000)});const health=await response.json();process.exitCode=response.ok&&health.service==='edentica'&&health.backend==='python'&&health.database==='postgresql'?0:1}catch{process.exitCode=1}

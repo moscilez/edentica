@@ -1,0 +1,1 @@
+"""Edentica Python application."""
