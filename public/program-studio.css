@@ -8,3 +8,74 @@
 .section-note{font-size:12px;color:var(--muted)}
 
 .brand .brand-mark{display:block;width:36px;height:36px;flex-shrink:0}.brand>span{font-size:23px;letter-spacing:-.9px}.brand{gap:10px}
+.profile-trigger{padding:0;border:1px solid transparent;flex-shrink:0;transition:background-color .2s ease,box-shadow .2s ease}
+.profile-trigger:hover{background:#e3d8fa;border-color:#c9b5ee}
+.profile-trigger:focus-visible{outline:2px solid #7951ce;outline-offset:3px}
+#profile-dialog{max-height:85vh;overflow:auto}
+.profile-summary{display:flex;gap:16px;align-items:center;padding:5px 0 24px;border-bottom:1px solid var(--border)}
+.profile-summary p{margin:0;font-size:17px;font-weight:600;overflow-wrap:anywhere;min-width:0}
+.profile-avatar{display:grid;place-items:center;width:56px;height:56px;border-radius:16px;background:#eee8fc;color:#6a43bc;font-size:21px;flex-shrink:0}
+.profile-facts{margin:24px 0 0}.profile-facts dt{font-size:12px;color:var(--muted);margin-top:20px}
+.profile-facts dd{margin:7px 0 0;font-size:15px;line-height:1.5;overflow-wrap:anywhere}
+.profile-actions{margin-top:28px;padding-top:20px;border-top:1px solid var(--border)}
+.profile-actions button{width:100%;color:#963d3d;transition:background-color .2s ease,border-color .2s ease}
+.profile-actions button:hover{background:#fff3f1;border-color:#e7bdb7}
+.breadcrumbs{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0;padding:10px 0;line-height:1.5}
+.breadcrumbs a{color:#737986;text-decoration:none;border-radius:3px;transition:color .15s ease}
+.breadcrumbs a:hover{color:#6944b7;text-decoration:underline;text-underline-offset:3px}
+.breadcrumbs a:focus-visible{outline:2px solid #7951ce;outline-offset:3px}
+.breadcrumbs a,.breadcrumbs [aria-current]{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+header .breadcrumbs span{margin:0}
+.breadcrumbs [aria-current]{color:#31343a;font-weight:500}
+.breadcrumbs .breadcrumb-separator{color:#a1a5ad;flex-shrink:0}
+.example-card{display:flex;flex-direction:column;align-items:flex-start}
+.example-card [data-example]{margin-top:auto;align-self:flex-start;text-align:left;padding-left:0;padding-right:0}
+.program-card{display:flex;flex-direction:column;align-items:flex-start}
+.program-card .card-action{margin-top:auto}
+.program-card-actions{margin-top:auto;width:100%;display:flex;flex-direction:column;gap:10px}
+.program-card-actions .card-action{margin-top:0}
+.delete-program{color:#963d3d;background:transparent;font-size:12px}
+.delete-program:hover{background:#fff3f1;border-color:#e7bdb7}
+.program-heading-actions{display:flex;gap:10px;flex-wrap:wrap}
+.job #cancel-job{color:#b42332;background:#fff;border-color:#e7c3c8}
+.job #cancel-job:hover{color:#941c29;background:#fff1f2;border-color:#cf8d98}
+@media (prefers-reduced-motion:reduce){.profile-trigger{transition:none}}
+
+/* A quiet invitation to explore the assistant, with motion kept decorative. */
+.nav-item{transition:background-color .2s ease,color .2s ease,box-shadow .2s ease}
+.nav-item.active{background:transparent;color:#62666e;font-weight:400}
+.nav-item span{transition:transform .2s ease}
+.nav-item:focus-visible{background-color:#f0eafd;box-shadow:0 0 0 3px #7951ce20}
+@media (hover:hover) and (pointer:fine){
+ .nav-item:hover{background-color:#f0eafd;color:#6540ac}
+ .nav-item:hover span{transform:translateX(3px)}
+}
+.nav-item:active span{transform:translateX(1px)}
+@media (prefers-reduced-motion:reduce){
+ .nav-item,.nav-item span{transition:none}
+ .nav-item:hover span,.nav-item:active span{transform:none}
+}
+.hero{transition:background-color .3s ease,box-shadow .3s ease}
+.hero .orbit{transition:transform .65s cubic-bezier(.22,1,.36,1)}
+.hero .orbit span{transition:transform .65s cubic-bezier(.22,1,.36,1),box-shadow .3s ease}
+.hero-copy button{transition:transform .2s ease,box-shadow .2s ease,background-color .2s ease,border-color .2s ease}
+.hero:focus-within{background-color:#e9e2fa;box-shadow:0 8px 26px #7951ce12}
+.hero:focus-within .orbit{transform:rotate(8deg) scale(1.06)}
+.hero:focus-within .orbit span{transform:rotate(-20deg);box-shadow:0 12px 30px #7951ce30}
+.hero-copy button:focus-visible{box-shadow:0 0 0 4px #7951ce25}
+@media (hover:hover) and (pointer:fine){
+ .hero:hover{background-color:#e9e2fa;box-shadow:0 8px 26px #7951ce12}
+ .hero:hover .orbit{transform:rotate(8deg) scale(1.06)}
+ .hero:hover .orbit span{transform:rotate(-20deg);box-shadow:0 12px 30px #7951ce30}
+ .hero-copy button:hover{transform:translateY(-2px);box-shadow:0 5px 14px #25272c18}
+ .hero-copy #start:hover{background-color:#383340;border-color:#383340}
+ .hero-copy #demo:hover{border-color:#b6a1e4;background-color:#fcfaff}
+}
+.hero-copy button:active{transform:translateY(0)}
+@media (prefers-reduced-motion:reduce){
+ .hero,.hero .orbit,.hero .orbit span,.hero-copy button{transition:none}
+ .hero:hover .orbit,.hero:focus-within .orbit{transform:rotate(-12deg)}
+ .hero:hover .orbit span,.hero:focus-within .orbit span,.hero-copy button:hover{transform:none}
+}
+
+.module-hours-total{display:flex;justify-content:space-between;gap:16px;border-top:1px solid var(--border,#e4e6ec);padding-top:18px;margin-top:22px}

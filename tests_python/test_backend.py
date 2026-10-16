@@ -235,6 +235,40 @@ def test_source_checks_do_not_fetch_arbitrary_hosts():
         assert result["access"] == "manual_review"
 
 
+def test_delete_requires_confirmation_and_ownership(client):
+    account, email = register(client)
+    ref = client.post("/api/materials", headers=HEADERS, json={"name": "keep.txt", "data": base64.b64encode(b"Reference to keep").decode()}).json()["id"]
+    p = agent(client, "create", request="Удаляемая программа", referenceIds=[ref]).json()
+    other = agent(client, "create", request="Сохраняемая программа").json()
+    assert agent(client, "delete", id=p["id"]).status_code == 422
+    assert agent(client, "get", id=p["id"]).status_code == 200
+    register(client)
+    assert agent(client, "delete", id=p["id"], confirm=True).status_code == 404
+    client.post("/api/auth/login", headers=HEADERS, json={"email": email, "password": "password-test-long"})
+    assert agent(client, "delete", id=p["id"], confirm=True).json()["ok"]
+    assert agent(client, "get", id=p["id"]).status_code == 404
+    assert agent(client, "delete", id=p["id"], confirm=True).status_code == 404
+    assert agent(client, "get", id=other["id"]).status_code == 200
+    assert client.get("/api/materials/" + ref).status_code == 200
+    assert p["id"] not in [x["id"] for x in agent(client, "list").json()]
+    assert client.app.state.db.one("SELECT count(*) AS n FROM program_events WHERE project_id=%s", (p["id"],))["n"] == 0
+
+
+def test_delete_cancels_running_job_without_recreating_program(postgres_url):
+    async def blocked(skill, payload):
+        await asyncio.sleep(30)
+    app = create_app(postgres_url, blocked)
+    with TestClient(app, base_url="http://localhost") as client:
+        register(client)
+        p = agent(client, "create", request="Удаление во время генерации").json()
+        assert agent(client, "analyze", id=p["id"]).status_code == 200
+        assert p["id"] in app.state.programs.jobs
+        assert agent(client, "delete", id=p["id"], confirm=True).status_code == 200
+        assert p["id"] not in app.state.programs.jobs
+        assert agent(client, "get", id=p["id"]).status_code == 404
+        assert app.state.db.one("SELECT count(*) AS n FROM program_events WHERE project_id=%s", (p["id"],))["n"] == 0
+
+
 def test_cloudru_http_contract_without_real_calls(monkeypatch):
     import httpx
     from types import SimpleNamespace

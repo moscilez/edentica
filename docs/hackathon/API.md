@@ -2,6 +2,8 @@
 
 API обслуживает Python/FastAPI, данные хранятся в PostgreSQL. `GET /api/health` возвращает `backend: "python"` и `database: "postgresql"`. Несовпадение версии при правке или согласовании возвращает HTTP 409. Пользовательский контракт `/api/agent` сохранён.
 
+В статусе провайдера `localTesting: true` и `foreignProvidersEnabled: true` обозначают временный локальный Codex-режим с подпиской ChatGPT. Он недоступен при EDENTICA_MODE=hackathon. `configured` проверяет вход CLI, но доступность лимита подтверждается только реальным запросом. Поля `usage.provider`, `usage.localTesting` и `usage.byProvider` разделяют тестовый расход OpenAI и токены Cloud.ru.
+
 Все операции нового агента доступны через `POST /api/agent`. Ответ JSON, кроме бинарного экспорта. Аутентификация — обычная сессия Edentica; `GET /api/agent` возвращает конфигурационный статус. Для POST передавайте `Content-Type: application/json` и `X-Edentica: 1`. При браузерном Origin он должен совпадать с адресом сервера. Host должен входить в ALLOWED_HOSTS или PUBLIC_URL. Сервер не открывает CORS.
 
 Для стенда проверки сначала зарегистрируйте пользователя или войдите через POST /api/auth/register или /api/auth/login и сохраните cookie session. Пример регистрации: `{"name":"Методист","email":"methodist@example.test","password":"ваш_пароль_не_короче_10_знаков"}`. Это общий механизм авторизации, а не навык агента.
@@ -10,6 +12,7 @@ API обслуживает Python/FastAPI, данные хранятся в Post
 |---|---|---|
 | status | — | Провайдер, наличие настроек, доступность PPTX |
 | list | — | Программы текущего пользователя |
+| delete | id, confirm: true | Удаляет свою программу с материалами и историей; активная задача сначала отменяется. Референсы в библиотеке сохраняются. |
 | create | request, referenceIds? | Сохранённый запрос, id программы |
 | demo | — | Явно обозначенный подготовленный пример |
 | get | id | Полный JSON, job, report, события |

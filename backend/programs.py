@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from psycopg.types.json import Jsonb
 
 from . import cloudru
+from .codex_provider import CodexProvider
 from .exports import export_program
 
 
@@ -58,7 +59,15 @@ async def probe_source(source):
 class Programs:
     def __init__(self, db, rules, complete=None):
         self.db, self.rules = db, rules
-        self.complete = complete or cloudru.complete
+        provider = os.getenv("LLM_PROVIDER", "cloudru").lower()
+        if provider not in ("cloudru", "codex"):
+            raise ValueError("LLM_PROVIDER должен быть cloudru или codex")
+        if provider == "codex" and os.getenv("EDENTICA_MODE") != "local":
+            raise ValueError("Codex разрешён только при EDENTICA_MODE=local. Для хакатона используйте cloudru.")
+        if provider == "codex" and (os.getenv("HOST") or "127.0.0.1") not in ("127.0.0.1", "localhost", "::1"):
+            raise ValueError("Локальный Codex-провайдер разрешён только на loopback HOST")
+        self.codex = CodexProvider() if provider == "codex" else None
+        self.complete = complete or (self.codex.complete if self.codex else cloudru.complete)
         self.allow_unconfigured = complete is not None
         self.jobs = {}
         self.locks = {}
@@ -66,8 +75,13 @@ class Programs:
         self.closed = False
 
     async def initialize(self):
+        if self.codex and not self.allow_unconfigured:
+            await self.codex.initialize()
         config = await self.rules.call("config")
         self.skills, self.sections = config["skills"], config["templateSections"]
+
+    def provider_status(self):
+        return self.codex.status() if self.codex else {**cloudru.status(), "localTesting": False}
 
     async def query(self, method, *args):
         task = asyncio.create_task(asyncio.to_thread(getattr(self.db, method), *args))
@@ -110,12 +124,22 @@ class Programs:
     async def call(self, p, skill, payload):
         result = await self.complete(self.skills[skill], payload)
         usage = p["usage"]
+        if "byProvider" not in usage:
+            previous = "codex" if usage.get("localTesting") else "cloudru"
+            usage["byProvider"] = {previous: {key: usage.get(key, 0) for key in ("inputTokens", "outputTokens", "calls")}}
+        current_provider = "codex" if self.codex else "cloudru"
+        ledger = usage["byProvider"].setdefault(current_provider, {"inputTokens": 0, "outputTokens": 0, "calls": 0})
         for key in ("inputTokens", "outputTokens"):
             usage[key] += result.get("usage", {}).get(key, 0)
+            ledger[key] += result.get("usage", {}).get(key, 0)
         usage["calls"] += 1
-        usage["model"] = result.get("model") or cloudru.status()["model"]
+        ledger["calls"] += 1
+        usage["model"] = result.get("model") or self.provider_status()["model"]
+        usage["provider"] = self.provider_status()["provider"]
+        usage["localTesting"] = self.provider_status()["localTesting"]
         incoming, outgoing = os.getenv("CLOUDRU_INPUT_RUB_PER_MILLION"), os.getenv("CLOUDRU_OUTPUT_RUB_PER_MILLION")
-        usage["estimatedRubles"] = (usage["inputTokens"] * float(incoming) + usage["outputTokens"] * float(outgoing)) / 1e6 if incoming and outgoing else None
+        cloud_usage = usage["byProvider"].get("cloudru", {})
+        usage["estimatedRubles"] = (cloud_usage.get("inputTokens", 0) * float(incoming) + cloud_usage.get("outputTokens", 0) * float(outgoing)) / 1e6 if incoming and outgoing and not self.codex else None
         return result["value"]
 
     async def launch(self, p, kind, work):
@@ -168,8 +192,8 @@ class Programs:
         owner = user["id"]
         if action == "status":
             from .exports import pptx_available
-            return {**cloudru.status(), "pptx": pptx_available(), "skills": list(self.skills),
-                    "humanApprovalRequired": True, "foreignProvidersEnabled": False}
+            return {**self.provider_status(), "pptx": pptx_available(), "skills": list(self.skills),
+                    "humanApprovalRequired": True, "foreignProvidersEnabled": bool(self.codex)}
         if action == "list":
             rows = await self.query("all", "SELECT document FROM program_projects WHERE owner=%s ORDER BY updated DESC", (owner,))
             return [{"id": p["id"], "title": p.get("skeleton", {}).get("title") or p["request"][:90],
@@ -193,10 +217,25 @@ class Programs:
                 task.cancel()
                 await task
                 return {"ok": True}
+            if action == "delete":
+                ensure(body.get("confirm") is True, "Подтвердите удаление программы")
+                task = self.jobs.get(id)
+                if task:
+                    task.cancel()
+                    await task
+
+                def remove():
+                    with self.db.pool.connection() as connection:
+                        row = connection.execute("SELECT id FROM program_projects WHERE id=%s AND owner=%s FOR UPDATE", (id, owner)).fetchone()
+                        ensure(row, "Программа не найдена", 404)
+                        connection.execute("DELETE FROM program_events WHERE project_id=%s", (id,))
+                        connection.execute("DELETE FROM program_projects WHERE id=%s AND owner=%s", (id, owner))
+                await asyncio.to_thread(remove)
+                return {"ok": True, "id": id}
             self.idle(p)
             if action in ("analyze", "skeleton"):
                 ensure(not p["demo"], "Демо не вызывает модель. Создайте новую программу.")
-                ensure(self.allow_unconfigured or cloudru.status()["configured"], "Настройте CLOUDRU_API_KEY и CLOUDRU_MODEL в .env", 503)
+                ensure(self.allow_unconfigured or self.provider_status()["configured"], "Настройте провайдер модели и перезапустите сервер", 503)
                 if action == "analyze":
                     ensure(not p.get("approval"), "После согласования редактируйте каркас с новым утверждением")
                     answers = body.get("answers", {})
@@ -236,7 +275,7 @@ class Programs:
             if action in ("generate", "revise_module"):
                 await self.approved(p)
                 ensure(not p["demo"], "Демо не вызывает модель")
-                ensure(self.allow_unconfigured or cloudru.status()["configured"], "Cloud.ru не настроен", 503)
+                ensure(self.allow_unconfigured or self.provider_status()["configured"], "Провайдер модели не настроен", 503)
                 target = next((m for m in p["skeleton"]["modules"] if m["id"] == body.get("moduleId")), None) if action == "revise_module" else None
                 if action == "revise_module":
                     ensure(target and target["id"] in p["materials"], "Модуль не найден или ещё не создан")
@@ -287,6 +326,7 @@ class Programs:
              "materials": {}, "sections": {}, "sources": [], "history": [], "job": None, "approval": None,
              "usage": {"inputTokens": 0, "outputTokens": 0, "calls": 0, "estimatedRubles": None},
              "createdAt": now(), "updatedAt": now(), "demo": action == "demo"}
+        p["usage"].update(provider=self.provider_status()["provider"], localTesting=bool(self.codex))
         if p["demo"]:
             p.update(await self.rules.call("demonstration"))
             p.update(state="skeleton_review", notes=["Это подготовленный пример для проверки интерфейса. Он не сгенерирован моделью."],
