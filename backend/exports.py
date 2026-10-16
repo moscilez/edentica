@@ -11,6 +11,11 @@ from .database import ROOT
 
 
 def pptx_available():
+    # python-pptx is part of the portable runtime requirements.
+    return True
+
+
+def artifact_pptx_available():
     candidates = [Path(os.getenv("ARTIFACT_NODE_MODULES") or ROOT / "node_modules"),
                   Path.home() / ".cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules"]
     return any((p / "@oai/artifact-tool/package.json").exists() for p in candidates)
@@ -73,10 +78,12 @@ async def export_program(program, format, module_id=None):
         content = await subprocess_bytes([sys.executable, str(ROOT / "scripts/export-program.py")], payload)
         mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     elif format == "pptx":
-        if not pptx_available():
-            raise HTTPException(503, "Настройте ARTIFACT_NODE_MODULES для экспорта PPTX")
-        content = await subprocess_bytes([os.getenv("NODE_PATH") or "node", str(ROOT / "scripts/export-slides.mjs")],
-                                         json.dumps({"program": program, "moduleId": module_id}).encode(), timeout=120)
+        if artifact_pptx_available():
+            content = await subprocess_bytes([os.getenv("NODE_PATH") or "node", str(ROOT / "scripts/export-slides.mjs")],
+                                             json.dumps({"program": program, "moduleId": module_id}).encode(), timeout=120)
+        else:
+            from .slides import program_pptx
+            content = await asyncio.to_thread(program_pptx, program, module_id)
         mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     else:
         raise HTTPException(422, "Неизвестный формат")
