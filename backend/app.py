@@ -245,7 +245,8 @@ def create_app(database_url=None, complete=None):
 
     @app.get("/{asset}")
     async def assets(asset: str):
-        allowed = {"brand.svg", "favicon.svg", "program-studio.js", "program-studio.css", "program-editor.js"}
+        allowed = {"brand.svg", "brand.png", "favicon.svg", "favicon.png", "favicon.ico",
+                   "program-studio.js", "program-studio.css", "program-editor.js"}
         ensure(asset in allowed, "Не найдено", 404)
         return FileResponse(ROOT / "public" / asset)
 

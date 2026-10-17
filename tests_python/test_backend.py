@@ -50,7 +50,8 @@ def wait(client, id):
 def test_authentication_security_and_static(client):
     assert client.get("/api/health").json()["database"] == "postgresql"
     assert "<title>Эдентика</title>" in client.get("/").text
-    for asset in ("favicon.svg", "brand.svg", "program-studio.js", "program-studio.css", "program-editor.js"):
+    for asset in ("favicon.svg", "favicon.png", "favicon.ico", "brand.svg", "brand.png",
+                  "program-studio.js", "program-studio.css", "program-editor.js"):
         assert client.get("/" + asset).status_code == 200
     assert agent(client, "list").status_code == 401
     account, email = register(client)
