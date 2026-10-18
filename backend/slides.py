@@ -44,7 +44,7 @@ def program_pptx(program, module_id=None):
             title = str(content.get("title", ""))
             if part:
                 title += " · продолжение"
-            box(title, .6, 1, 12, 1.5, 26 if len(title) > 90 else 32, "202126", True)
+            box(title, .6, 1, 12, 1.5, 20 if len(title)>150 else 26 if len(title) > 90 else 32, "202126", True)
             box(chunk, .6, 2.6, 12, 4.15, 20, "202126")
             box(str(len(deck.slides)), 12, 7, .7, .3, 11, "727780")
             slide.notes_slide.notes_text_frame.text = str(content.get("notes", ""))

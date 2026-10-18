@@ -1,88 +1,108 @@
-# Запуск Эдентики на ВМ/VPS через Docker
+# Docker: локально, ВМ и VPS
 
-На сервере нужны Docker Engine и Compose plugin (команда `docker compose`).
-Python, Node.js и PostgreSQL на сам сервер устанавливать не требуется: они находятся в образах.
-Используются Linux-контейнеры; на Windows нужен запущенный Docker Desktop в режиме Linux containers.
+Требуются Docker Engine и Docker Compose plugin. Отдельная установка Python, Node.js, PostgreSQL или npm build на сервер не нужна.
 
-## Подготовка
+## Сервисы
 
-Скопируйте исходники проекта на сервер, например в `/opt/edentica`, без `.env`, `node_modules`, `.venv`, `data`, `output` и `.git`.
-Нужны Dockerfile, compose.yaml, requirements*.txt, package.json и каталоги backend, public, src, scripts, templates.
-Локальный кластер PostgreSQL и данные с компьютера автоматически не переносятся.
+- frontend — непривилегированный Nginx, порт 8000; статические файлы и reverse proxy /api.
+- backend — Python/FastAPI, внутренний порт 3000; Node используется для существующих правил.
+- db — PostgreSQL 18, только внутренняя сеть.
+- test и test-db — изолированный профиль проверок; production volume и реальные ключи в тесты не передаются.
+
+Образы приложения не содержат .env, пользовательских данных, локальных Python-окружений и артефактов. Frontend копирует только рабочие файлы интерфейса.
+
+## Подготовка окружения
+
+Скопируйте исходники на сервер без .env, .env.docker, data, output, .venv, node_modules и .git.
+В каталоге проекта:
 
 ```bash
-cd /opt/edentica
 cp .env.docker.example .env.docker
 chmod 600 .env.docker
 ```
 
-В `.env.docker` замените `POSTGRES_PASSWORD` длинным случайным паролем из букв/цифр (можно получить `openssl rand -hex 32`).
-Пароль входит в URL подключения: не используйте `@`, `:`, `/`, `%`, `#`, `$` и другие спецсимволы.
-Альтернатива при наличии Python: `python scripts/docker-init.py` создаёт файл и пароль автоматически; существующий файл не перезаписывается.
+Укажите длинный случайный POSTGRES_PASSWORD из букв/цифр (например результат `openssl rand -hex 32`).
+Для APP_ENCRYPTION_KEY нужен URL-safe base64 ключ на 32 байта (`openssl rand -base64 32 | tr '+/' '-_'`).
+При наличии Python можно выполнить `python scripts/docker-init.py`: он создаёт оба ключа и не перезаписывает существующий файл.
 
-Параметры для запуска по IP:
+Локальные значения:
 
 ```dotenv
-POSTGRES_PASSWORD=ваш_случайный_пароль
-PUBLIC_URL=http://203.0.113.10:3000
-BIND_ADDRESS=0.0.0.0
-HTTP_PORT=3000
+PUBLIC_URL=http://localhost:8000
+BIND_ADDRESS=127.0.0.1
+HTTP_PORT=8000
 COOKIE_SECURE=0
-CLOUDRU_API_KEY=ваш_ключ
-CLOUDRU_MODEL=идентификатор_модели
 ```
 
-Замените пример IP адресом своего сервера. Разрешите входящий TCP-порт 3000 в firewall ВМ и правилах провайдера.
-При PUBLIC_URL с нестандартным портом укажите его и в браузере. ALLOWED_HOSTS нужен только для дополнительных доменов/IP, через запятую, без схемы и портов.
-Для тестирования на самом сервере оставьте `BIND_ADDRESS=127.0.0.1` и `PUBLIC_URL=http://localhost:3000`.
+На публичной ВМ/VPS нужен HTTPS: настройте домен/сертификат и reverse proxy либо используйте выданный HTTPS demo URL.
+Публичный HTTP для паролей и персональных API-ключей не поддерживается; backend откажется запускаться с внешним HTTP PUBLIC_URL.
 
-## Запуск и проверка
+```dotenv
+PUBLIC_URL=https://your-domain.example
+COOKIE_SECURE=1
+BIND_ADDRESS=127.0.0.1
+HTTP_PORT=8000
+```
 
-Каждый раз используйте `--env-file .env.docker`: локальный `.env` разработки не предназначен для Docker.
+Если перед ВМ уже стоит HTTPS-прокси инфраструктуры и он должен подключаться к внешнему порту ВМ, задайте BIND_ADDRESS=0.0.0.0 и ограничьте доступ сетевыми правилами провайдера. Приложение на ВМ слушает 0.0.0.0:8000. Не включайте HTTP-доступ к реальным паролям/ключам как промежуточный способ настройки.
+
+Модель сервера:
+
+```dotenv
+LLM_BASE_URL=https://your-issued-gateway.example/v1
+LLM_API_KEY=your-issued-key
+LLM_MODEL=exact-model-id
+```
+
+Либо используйте CLOUDRU_API_KEY и CLOUDRU_MODEL. В текущем развёртывании по указанию владельца SYSTEM_LLM_SHARED_ACCESS=1: серверная модель доступна всем зарегистрированным методистам, ключ остаётся на сервере. Внутренних токенных бюджетов нет; квоты поставщика сохраняются. Для ограничения доступа отключите этот флаг и укажите SYSTEM_LLM_ALLOWED_USERS=uuid1,uuid2 либо используйте личные подключения. Произвольные пользовательские OpenAI-совместимые подключения добавляются через настройки профиля и шифруются APP_ENCRYPTION_KEY. Сохраняйте этот ключ неизменным между релизами.
+Локальный Codex CLI через ChatGPT работает только в локальном Python-сервере на loopback; Windows-авторизация Codex не копируется на публичную ВМ.
+
+## Сборка и запуск
 
 ```bash
 docker compose --env-file .env.docker config --quiet
-docker compose --env-file .env.docker up -d --build --wait
+docker compose --env-file .env.docker build
+docker compose --env-file .env.docker up -d --wait
 docker compose --env-file .env.docker ps
-curl -f http://127.0.0.1:3000/api/health
-docker compose --env-file .env.docker logs --tail=100 edentica
+curl -f http://127.0.0.1:8000/api/health
+docker compose --env-file .env.docker logs --tail=100 backend frontend
 ```
 
-Откройте адрес из PUBLIC_URL, зарегистрируйте пользователя и откройте демонстрационную программу.
-Проверка health должна вернуть `status: ready` и `database: postgresql`.
-Проверки здоровья подтверждают доступность приложения и БД, а не качество бизнес-логики или модели.
-Без ключа Cloud.ru доступны интерфейс, аккаунты и демонстрация; настоящая генерация требует ключа и модели.
-
-В контейнере принудительно используется провайдер Cloud.ru. Локальный вход по подписке Codex из Windows сюда не переносится.
-Node.js используется для существующих правил/промптов; основной сервер работает на Python.
-DOCX, JSON, GIFT и PPTX работают без библиотек Codex на сервере: для PPTX предусмотрен переносимый экспорт python-pptx.
-
-## Данные и остановка
-
-PostgreSQL доступен только внутри сети Compose, порт БД на хост не публикуется.
-Именованный volume `edentica-postgres` содержит БД PostgreSQL 18; `edentica-data` — файлы приложения и референсы.
-Таблицы и миграции создаются приложением при старте после готовности БД.
-Запускайте один контейнер приложения: текущий планировщик не рассчитан на горизонтальное масштабирование.
+Откройте PUBLIC_URL, создайте аккаунт с нужной ролью. База изначально пустая, без кейсовых примеров.
+Без ключа модели работают аккаунты и сценарии каталога/обучения, генерация недоступна.
+Health проверяет доступность приложения и БД, а не качество материалов или подключение LLM.
 
 ```bash
-# Остановка без удаления данных
-docker compose --env-file .env.docker down
-# Повторный запуск
-docker compose --env-file .env.docker up -d --wait
-# После изменения исходников или настроек
-docker compose --env-file .env.docker up -d --build --wait
+# Тесты без платных модельных вызовов и без production volume
+docker compose --env-file .env.docker --profile test build test
+docker compose --env-file .env.docker --profile test run --rm test
+# Удалить остановленный тестовый сервер; его данные находятся в tmpfs
+docker compose --env-file .env.docker --profile test stop test-db
 ```
 
-Не добавляйте `-v` к `down`: этот флаг удаляет тома и данные.
-После инициализации БД простая замена POSTGRES_PASSWORD в файле не меняет пароль внутри PostgreSQL: смену нужно согласованно выполнить в БД и конфигурации.
+TestClient использует локальный HTTP внутри контейнера, поэтому тестовый сервис отдельно задаёт COOKIE_SECURE=0. На публичный backend это не распространяется.
 
-## Домен и HTTPS
+## Постоянные данные
 
-Для публичного сервера настройте Nginx/Caddy на хосте с TLS-сертификатом:
+Volume edentica-postgres хранит PostgreSQL; edentica-data — файлы приложения. Таблицы обновляются при старте backend. Запускайте один backend: текущий планировщик не рассчитан на горизонтальное масштабирование.
+
+```bash
+docker compose --env-file .env.docker down
+docker compose --env-file .env.docker up -d --wait
+# После обновления файлов:
+docker compose --env-file .env.docker build
+docker compose --env-file .env.docker up -d --wait
+```
+
+Не добавляйте -v к down: это удаляет тома. После инициализации PostgreSQL изменение POSTGRES_PASSWORD только в файле не меняет пароль в БД. Новому релизу нужны прежние POSTGRES_PASSWORD и APP_ENCRYPTION_KEY.
+
+## Nginx/Caddy перед контейнером
+
+Если TLS завершает прокси хоста, передавайте исходный Host, сохраняйте cookie и разрешите запросы до 7 МБ:
 
 ```nginx
 location / {
-    proxy_pass http://127.0.0.1:3000;
+    proxy_pass http://127.0.0.1:8000;
     proxy_set_header Host $http_host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -92,32 +112,34 @@ location / {
 }
 ```
 
-Сохранение исходного Host обязательно для проверки разрешённых адресов и Origin.
-Укажите `PUBLIC_URL=https://ваш-домен`, `COOKIE_SECURE=1`, `BIND_ADDRESS=127.0.0.1`, затем пересоздайте контейнер приложения.
-DNS и выдача сертификата настраиваются отдельно. Конфигурация выше — фрагмент location, а не полный TLS-конфиг.
-Приложение пока считает лимиты запросов по адресу proxy: это существующее ограничение для большой аудитории за одним reverse proxy.
+Это location-фрагмент; сертификат и server-блок настраиваются отдельно. API-лимиты авторизованных запросов считаются по пользователю. Лимит входа/регистрации остаётся на IP непосредственного прокси; для большого потока регистраций нужен отдельно доверенный механизм клиентских IP и инфраструктурная защита.
 
-## Резервное копирование и перенос
+## Резервные копии
 
-Бинарные дампы переносите через `docker cp`, чтобы перенаправление PowerShell не испортило файл.
+Копируйте бинарные дампы через docker cp, чтобы PowerShell не изменил байты:
 
 ```bash
-docker compose --env-file .env.docker exec -T postgres pg_dump -U edentica -d edentica -Fc -f /tmp/edentica.dump
-docker compose --env-file .env.docker exec -T postgres pg_restore --list /tmp/edentica.dump
-docker compose --env-file .env.docker cp postgres:/tmp/edentica.dump ./edentica.dump
+docker compose --env-file .env.docker exec -T db pg_dump -U edentica -d edentica -Fc -f /tmp/edentica.dump
+docker compose --env-file .env.docker exec -T db pg_restore --list /tmp/edentica.dump
+docker compose --env-file .env.docker cp db:/tmp/edentica.dump ./edentica.dump
 ```
 
-Для файлов референсов также нужна отдельная копия volume `edentica-data`. Сохраняйте её одновременно с дампом при остановленном приложении.
-Для переноса локальной разработки сначала сделайте PostgreSQL-дамп и копию `data` на компьютере; не копируйте каталог физического кластера `data/postgres` в Linux-контейнер.
-Восстанавливайте дамп в новую пустую БД, пока приложение остановлено:
+Отдельно сохраните APP_ENCRYPTION_KEY и файлы edentica-data. Без ключа подключения моделей не расшифровать.
+Для согласованной копии файлов остановите backend. Восстановление делайте в новую пустую БД при остановленном backend:
 
 ```bash
-docker compose --env-file .env.docker stop edentica
-docker compose --env-file .env.docker cp ./edentica.dump postgres:/tmp/edentica-restore.dump
-docker compose --env-file .env.docker exec -T postgres pg_restore -U edentica -d edentica --no-owner --no-acl --exit-on-error /tmp/edentica-restore.dump
+docker compose --env-file .env.docker stop backend
+docker compose --env-file .env.docker cp ./edentica.dump db:/tmp/restore.dump
+docker compose --env-file .env.docker exec -T db pg_restore -U edentica -d edentica --no-owner --no-acl --exit-on-error /tmp/restore.dump
 docker compose --env-file .env.docker up -d --wait
 ```
 
-Не выполняйте восстановление поверх рабочей БД без её отдельной резервной копии. Файлы референсов восстанавливаются отдельно с сохранением путей и прав UID/GID 10001.
+Не восстанавливайте поверх рабочей БД без резервной копии. Физический Windows-каталог data/postgres не переносится в Linux: используйте pg_dump. Файлы приложения восстанавливаются с UID/GID 10001.
 
-Официальные справки: [переменные Compose](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/), [образ PostgreSQL и layout данных версии 18](https://hub.docker.com/_/postgres).
+## ВМ команды
+
+Код загружается отдельным релизом внутри ~/project/edentica-release-*, без Git-операций. Docker Compose работает из этого каталога. Актуальный путь записан локально в data/vm-release.json; это служебная метаинформация, не пароль.
+
+Серверные секреты хранятся вне репозитория в ~/.config/edentica/runtime.env (права 600), в каталог релиза копируется .env.docker. Ключ LLM читается на самой ВМ из /opt/hackathon/ai.env; он не входит в архив исходников и не выводится в журнал.
+
+Официальные справки: [Compose profiles](https://docs.docker.com/reference/compose-file/profiles/), [установка Compose](https://docs.docker.com/compose/install/), [образ PostgreSQL](https://hub.docker.com/_/postgres).

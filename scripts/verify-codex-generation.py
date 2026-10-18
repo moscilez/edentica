@@ -9,7 +9,7 @@ import time
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path.cwd() if __file__ == '<stdin>' else Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
@@ -22,8 +22,14 @@ from backend.app import create_app
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--full", action="store_true", help="Also generate all module materials and sections")
+parser.add_argument("--provider", choices=['codex','gateway'], default='codex')
 args = parser.parse_args()
-assert os.getenv("EDENTICA_MODE") == "local" and os.getenv("LLM_PROVIDER") == "codex"
+if args.provider=='codex':
+    assert os.getenv("EDENTICA_MODE") == "local" and os.getenv("LLM_PROVIDER") == "codex"
+else:
+    assert os.getenv('LLM_BASE_URL') and os.getenv('LLM_API_KEY')
+    # Applies only inside this isolated verification process, never to the server.
+    os.environ['SYSTEM_LLM_SHARED_ACCESS']='1'
 url = urlsplit(os.environ["DATABASE_URL"])
 name = "edentica_codexcheck_" + uuid4().hex
 admin_url = urlunsplit((url.scheme, url.netloc, "/postgres", url.query, url.fragment))
@@ -32,9 +38,9 @@ with psycopg.connect(admin_url, autocommit=True) as connection:
     connection.execute(sql.SQL("CREATE DATABASE {} TEMPLATE template0 ENCODING 'UTF8'").format(sql.Identifier(name)))
 headers = {"X-Edentica": "1"}
 started = time.monotonic()
-report = {"startedAt": datetime.now(timezone.utc).isoformat(), "provider": "codex", "full": args.full}
+report = {"startedAt": datetime.now(timezone.utc).isoformat(), "provider": args.provider, "full": args.full}
 try:
-    with TestClient(create_app(test_url), base_url="http://localhost") as client:
+    with TestClient(create_app(test_url), base_url="https://localhost") as client:
         response = client.post("/api/auth/register", headers=headers, json={"name": "Проверка генерации", "email": "generation@example.test", "password": "temporary-test-only"})
         response.raise_for_status()
 
@@ -59,14 +65,15 @@ try:
             raise TimeoutError("Время проверки истекло")
 
         state = agent("status")
-        assert state["configured"] and state["localTesting"], state
+        assert state["configured"] and (args.provider!='codex' or state["localTesting"]), state
         p = agent("create", request="Дополнительная общеразвивающая программа «Первые шаги в Python» на 16 академических часов для школьников 8–9 классов без опыта программирования. Очная форма, 4 недели, 8 занятий по 2 часа. Минимум половина часов — практика. Итоговая аттестация — защита небольшой игры на Python, 2 часа внутри общего объёма. Нужен итоговый тест на 10 вопросов с ответами, задания с критериями, планы лекций и слайды. Профстандарты не требуются.")
         id = p["id"]
         agent("analyze", id=id)
         p = wait(id)
-        assert p["state"] == "ready_for_skeleton", {"state": p["state"], "questions": p["questions"]}
-        agent("skeleton", id=id)
-        p = wait(id)
+        assert p["state"] in ("ready_for_skeleton","skeleton_review"), {"state": p["state"], "questions": p["questions"]}
+        if p['state']=='ready_for_skeleton':
+            agent("skeleton", id=id)
+            p = wait(id)
         assert p["skeleton"]["totalHours"] == 16
         report.update(skeletonSeconds=round(time.monotonic() - started, 2), modules=len(p["skeleton"]["modules"]))
         if args.full:
@@ -76,7 +83,7 @@ try:
             report.update(structurePassed=p["report"]["passed"], validationErrors=p["report"]["errors"],
                           coverage=len(p["report"]["coverage"]), readyModules=len(p["materials"]))
         report.update(usage=p["usage"], seconds=round(time.monotonic() - started, 2), state=p["state"])
-        output = ROOT / "output/codex-real-check"
+        output = ROOT / ("output/codex-real-check" if args.provider=='codex' else "data/gateway-real-check")
         output.mkdir(parents=True, exist_ok=True)
         (output / "program.json").write_text(json.dumps(p, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

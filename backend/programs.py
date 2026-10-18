@@ -1,10 +1,12 @@
 """Educational agent orchestration and human approval, owned by the Python API."""
 import asyncio
 import copy
+import hashlib
 from datetime import datetime, timezone
 import json
 import os
 import re
+import weakref
 from uuid import uuid4
 from urllib.parse import urlsplit
 
@@ -15,6 +17,7 @@ from psycopg.types.json import Jsonb
 from . import cloudru
 from .codex_provider import CodexProvider
 from .exports import export_program
+from .models import Models
 
 
 def now():
@@ -30,6 +33,22 @@ def required(value, maximum=200):
     ensure(isinstance(value, str) and 0 < len(value.strip()) <= maximum
            and not re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", value), "Проверьте заполнение полей")
     return value.strip()
+
+
+def intake_issues(value):
+    if not isinstance(value, dict):
+        return ['Ответ должен быть JSON-объектом']
+    issues=[]
+    if not isinstance(value.get('requirements'),dict):
+        issues.append('requirements должен быть объектом')
+    questions=value.get('questions')
+    if not isinstance(questions,list) or len(questions)>5:
+        issues.append('questions должен быть массивом не более пяти объектов')
+    elif any(not isinstance(q,dict) or any(not isinstance(q.get(k),str) or not q[k].strip() or len(q[k])>limit for k,limit in (('field',80),('question',2000))) for q in questions):
+        issues.append('Каждый элемент questions — объект {field:строка,question:строка}, а не строка')
+    if not isinstance(value.get('notes',[]),list) or any(not isinstance(n,str) for n in value.get('notes',[])):
+        issues.append('notes должен быть массивом строк')
+    return issues
 
 
 HOSTS = {"docs.python.org", "pandas.pydata.org", "numpy.org", "scipy.org", "matplotlib.org",
@@ -69,8 +88,11 @@ class Programs:
         self.codex = CodexProvider() if provider == "codex" else None
         self.complete = complete or (self.codex.complete if self.codex else cloudru.complete)
         self.allow_unconfigured = complete is not None
+        self.models = Models(db,allow_system=complete is not None)
         self.jobs = {}
-        self.locks = {}
+        self.locks = weakref.WeakValueDictionary()
+        self.cache_locks = weakref.WeakValueDictionary()
+        self.model_slots = asyncio.Semaphore(2)
         self.launch_lock = asyncio.Lock()
         self.closed = False
 
@@ -79,6 +101,9 @@ class Programs:
             await self.codex.initialize()
         config = await self.rules.call("config")
         self.skills, self.sections = config["skills"], config["templateSections"]
+        self.skills['intake_basic']=self.skills['intake']
+        # Complete briefs can yield a validated outline in one model roundtrip.
+        self.skills["intake"] += "\nЕсли аудитория, уровень, объём, формат и аттестация заданы полностью, не задавай необязательных вопросов: добавь в тот же JSON поле skeleton с каркасом по контракту ниже. При нехватке обязательных данных skeleton=null. Это предложение, не согласование человеком. Контракт для поля skeleton: " + self.skills["skeleton"] + "\nИтоговый JSON всегда {requirements,questions,notes,skeleton}; не возвращай каркас отдельно. Пиши компактно: не повторяй запрос, не включай учебные тексты или тесты в каркас, значения полей знаний, умений и навыков формулируй кратко."
 
     def provider_status(self):
         return self.codex.status() if self.codex else {**cloudru.status(), "localTesting": False}
@@ -116,31 +141,79 @@ class Programs:
     def idle(self, p):
         ensure(p["id"] not in self.jobs, "Дождитесь завершения текущей задачи или отмените её")
 
-    async def references(self, p):
+    async def references(self, p, query=""):
         rows = await self.query("all", "SELECT name,text,truncated FROM learning_materials WHERE id=ANY(%s) AND user_id=%s",
                                 (p["referenceIds"], p["owner"]))
-        return [{**r, "text": r["text"][:22000], "trust": "untrusted-reference"} for r in rows]
+        keywords = set(re.findall(r"\w{4,}",query.lower()))
+        result = []
+        budget = 12000
+        for row in rows:
+            chunks = [row["text"][i:i+1400] for i in range(0,len(row["text"]),1400)]
+            if keywords:
+                chunks.sort(key=lambda text: -sum(word in text.lower() for word in keywords))
+            excerpt = "\n".join(chunks[:4])[:min(6000,budget)]
+            budget -= len(excerpt)
+            result.append({**row,"text":excerpt,"trust":"untrusted-reference"})
+            if budget <= 0:
+                break
+        return result
 
     async def call(self, p, skill, payload):
-        result = await self.complete(self.skills[skill], payload)
+        connection = await self.models.selected(p["owner"])
+        profile = {"connectionId":connection["id"],"provider":connection["name"],"model":connection["model"],"localTesting":False,"personal":True} if connection else self.provider_status()
+        cache_key = hashlib.sha256(json.dumps([profile.get("connectionId"),profile.get("model"),self.skills.get(skill,skill),payload],ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+        async with self.cache_locks.setdefault((p['owner'],cache_key),asyncio.Lock()):
+            return await self._call_locked(p,skill,payload,profile,connection,cache_key)
+
+    async def _call_locked(self,p,skill,payload,profile,connection,cache_key):
+        cached = await self.query("one", "SELECT value FROM llm_cache WHERE owner=%s AND digest=%s AND created>now()-interval '7 days'",(p["owner"],cache_key))
+        if cached:
+            p["usage"]["cacheHits"] = p["usage"].get("cacheHits",0)+1
+            p["usage"].update(provider=profile["provider"],model=profile["model"],localTesting=profile["localTesting"])
+            return cached["value"]
+        try:
+            async with self.model_slots:
+                result = await self.models.complete(p["owner"],self.skills.get(skill,skill),payload,self.complete,selected=connection)
+        except (ValueError,HTTPException) as error:
+            if hasattr(error,'model_result'):
+                await self.account_usage(p,error.model_result,profile,skill,'failed')
+            raise
+        await self.account_usage(p,result,profile,skill)
+        cacheable=isinstance(result.get('value'),dict)
+        if cacheable and skill in ('intake','intake_basic'):
+            cacheable=not intake_issues(result['value'])
+        elif cacheable and skill=='skeleton':
+            cacheable=not (await self.rules.call('inspectSkeleton',result['value'],payload.get('requirements',{})))['errors']
+        elif cacheable and skill in ('module','revise'):
+            cacheable=not await self.rules.call('inspectModule',result['value'],payload['module'],payload['skeleton'])
+        if cacheable:
+            await self.query("execute", "INSERT INTO llm_cache(owner,digest,value) VALUES(%s,%s,%s) ON CONFLICT(owner,digest) DO UPDATE SET value=excluded.value,created=now()",(p["owner"],cache_key,Jsonb(result["value"])))
+            await self.query('execute',"DELETE FROM llm_cache WHERE owner=%s AND (created<now()-interval '7 days' OR digest NOT IN (SELECT digest FROM llm_cache WHERE owner=%s ORDER BY created DESC LIMIT 200))",(p['owner'],p['owner']))
+        return result["value"]
+
+    async def account_usage(self,p,result,profile,skill,status="completed"):
+        from .usage import record
+        counted=await record(self,p,result,profile,skill,status)
         usage = p["usage"]
         if "byProvider" not in usage:
             previous = "codex" if usage.get("localTesting") else "cloudru"
             usage["byProvider"] = {previous: {key: usage.get(key, 0) for key in ("inputTokens", "outputTokens", "calls")}}
-        current_provider = "codex" if self.codex else "cloudru"
+        current_provider = profile.get("connectionId") or ("codex" if self.codex else "cloudru")
         ledger = usage["byProvider"].setdefault(current_provider, {"inputTokens": 0, "outputTokens": 0, "calls": 0})
         for key in ("inputTokens", "outputTokens"):
-            usage[key] += result.get("usage", {}).get(key, 0)
-            ledger[key] += result.get("usage", {}).get(key, 0)
+            usage[key] += counted[key]
+            ledger[key] += counted[key]
         usage["calls"] += 1
         ledger["calls"] += 1
-        usage["model"] = result.get("model") or self.provider_status()["model"]
-        usage["provider"] = self.provider_status()["provider"]
-        usage["localTesting"] = self.provider_status()["localTesting"]
+        usage["model"] = result.get("model") or profile["model"]
+        usage["provider"] = profile["provider"]
+        usage["localTesting"] = profile["localTesting"]
         incoming, outgoing = os.getenv("CLOUDRU_INPUT_RUB_PER_MILLION"), os.getenv("CLOUDRU_OUTPUT_RUB_PER_MILLION")
         cloud_usage = usage["byProvider"].get("cloudru", {})
-        usage["estimatedRubles"] = (cloud_usage.get("inputTokens", 0) * float(incoming) + cloud_usage.get("outputTokens", 0) * float(outgoing)) / 1e6 if incoming and outgoing and not self.codex else None
-        return result["value"]
+        try:
+            usage["estimatedRubles"] = (cloud_usage.get("inputTokens", 0) * float(incoming) + cloud_usage.get("outputTokens", 0) * float(outgoing)) / 1e6 if incoming and outgoing and not self.codex and not profile.get("personal") else None
+        except ValueError:
+            usage['estimatedRubles']=None
 
     async def launch(self, p, kind, work):
         async with self.launch_lock:
@@ -156,7 +229,7 @@ class Programs:
 
         async def run():
             try:
-                async with asyncio.timeout(175 if kind == "skeleton" else 1180):
+                async with asyncio.timeout(175 if kind in ("skeleton","intake") else 1180):
                     await work(p)
                 p["job"]["state"] = "completed"
                 p["job"]["completed"] = p["job"]["total"]
@@ -186,22 +259,26 @@ class Programs:
             if not any(x["title"] == source["title"] or (x.get("url") and x["url"] == source.get("url")) for x in p["sources"]):
                 p["sources"].append({"id": str(uuid4()), "title": source["title"][:2000],
                                      "url": str(source.get("url") or "")[:3000], "kind": source.get("kind", "literature"),
-                                     "verification": {"status": "unverified"}})
+                                     "reason":str(source.get("reason") or "Источник предложен моделью; требуется проверка содержания")[:1500],
+                                     "moduleId":source.get("moduleId"), "verification": {"status": "unverified"}})
 
     async def action(self, action, body, user):
         owner = user["id"]
         if action == "status":
             from .exports import pptx_available
-            return {**self.provider_status(), "pptx": pptx_available(), "skills": list(self.skills),
+            return {**await self.models.status(owner,self.provider_status()), "pptx": pptx_available(), "skills": list(self.skills),
                     "humanApprovalRequired": True, "foreignProvidersEnabled": bool(self.codex)}
         if action == "list":
-            rows = await self.query("all", "SELECT document FROM program_projects WHERE owner=%s ORDER BY updated DESC", (owner,))
+            rows = await self.query("all", "SELECT document FROM program_projects WHERE owner=%s AND COALESCE(document->>'demo','false')<>'true' ORDER BY updated DESC", (owner,))
             return [{"id": p["id"], "title": p.get("skeleton", {}).get("title") or p["request"][:90],
                      **{k: p.get(k) for k in ("state", "revision", "updatedAt", "demo", "job")}}
                     for row in rows for p in [row["document"]]]
         if action in ("create", "demo"):
+            ensure(action != "demo" or self.allow_unconfigured, "Демонстрационные программы отключены",404)
             return await self.create(action, body, owner)
         id = required(body.get("id"), 80)
+        # Reject foreign/nonexistent IDs before allocating retained scheduler locks.
+        await self.load(id,owner)
         # Serialize read-modify-write actions within this scheduler. Polling is also
         # serialized, so it never observes a half-applied user edit.
         async with self.locks.setdefault(id, asyncio.Lock()):
@@ -211,6 +288,9 @@ class Programs:
                 for event in events:
                     event["detail"] = json.dumps(event["detail"], ensure_ascii=False)
                 return {**p, "report": await self.rules.call("inspectProgram", p) if p.get("skeleton") else None, "events": events}
+            if action == "messages":
+                from .chat import messages
+                return await messages(self,p)
             if action == "cancel":
                 task = self.jobs.get(id)
                 ensure(task, "Активной задачи нет")
@@ -218,6 +298,7 @@ class Programs:
                 await task
                 return {"ok": True}
             if action == "delete":
+                ensure(not await self.query("one", "SELECT 1 FROM publications WHERE project_id=%s",(id,)),"У программы есть опубликованная версия и история обучения. Удаление недоступно; переведите программу в приватный доступ.",409)
                 ensure(body.get("confirm") is True, "Подтвердите удаление программы")
                 task = self.jobs.get(id)
                 if task:
@@ -233,9 +314,25 @@ class Programs:
                 await asyncio.to_thread(remove)
                 return {"ok": True, "id": id}
             self.idle(p)
+            if action == "chat":
+                from .chat import converse
+                return await converse(self,p,body,owner)
+            if action == "apply_proposal":
+                from .chat import apply_proposal
+                return await apply_proposal(self,p,body,owner)
+            if action == "edit_module":
+                module = next((m for m in p["skeleton"]["modules"] if m["id"] == body.get("moduleId")),None)
+                ensure(module and body.get("expectedRevision") == p["revision"],"Обновите версию модуля",409)
+                candidate = body.get("material")
+                issues = await self.rules.call("inspectModule",candidate,module,p["skeleton"])
+                ensure(not issues,"; ".join(x["message"] for x in issues[:3]))
+                self.revision(p)
+                p["materials"][module["id"]] = candidate
+                await self.save(p)
+                return p
             if action in ("analyze", "skeleton"):
                 ensure(not p["demo"], "Демо не вызывает модель. Создайте новую программу.")
-                ensure(self.allow_unconfigured or self.provider_status()["configured"], "Настройте провайдер модели и перезапустите сервер", 503)
+                ensure(self.allow_unconfigured or (await self.models.status(owner,self.provider_status()))["configured"], "Настройте модель в личном профиле", 503)
                 if action == "analyze":
                     ensure(not p.get("approval"), "После согласования редактируйте каркас с новым утверждением")
                     answers = body.get("answers", {})
@@ -275,7 +372,7 @@ class Programs:
             if action in ("generate", "revise_module"):
                 await self.approved(p)
                 ensure(not p["demo"], "Демо не вызывает модель")
-                ensure(self.allow_unconfigured or self.provider_status()["configured"], "Провайдер модели не настроен", 503)
+                ensure(self.allow_unconfigured or (await self.models.status(owner,self.provider_status()))["configured"], "Провайдер модели не настроен", 503)
                 target = next((m for m in p["skeleton"]["modules"] if m["id"] == body.get("moduleId")), None) if action == "revise_module" else None
                 if action == "revise_module":
                     ensure(target and target["id"] in p["materials"], "Модуль не найден или ещё не создан")
@@ -325,7 +422,9 @@ class Programs:
              "state": "brief", "revision": 1, "requirements": {}, "questions": [], "notes": [],
              "materials": {}, "sections": {}, "sources": [], "history": [], "job": None, "approval": None,
              "usage": {"inputTokens": 0, "outputTokens": 0, "calls": 0, "estimatedRubles": None},
-             "createdAt": now(), "updatedAt": now(), "demo": action == "demo"}
+             "createdAt": now(), "updatedAt": now(), "demo": action == "demo",
+             "visibility":body.get("visibility","private")}
+        ensure(p["visibility"] in ("public","private"),"Выберите доступ программы")
         p["usage"].update(provider=self.provider_status()["provider"], localTesting=bool(self.codex))
         if p["demo"]:
             p.update(await self.rules.call("demonstration"))
@@ -347,8 +446,23 @@ class Programs:
 
     async def analyze(self, p):
         p["job"]["step"] = "Уточнение требований"
-        data = await self.call(p, "intake", {"request": p["request"], "answers": p.get("answers", {}), "references": await self.references(p)})
-        ensure(isinstance(data.get("requirements"), dict) and isinstance(data.get("questions"), list) and len(data["questions"]) <= 5, "Некорректный разбор запроса")
+        payload={"request": p["request"], "answers": p.get("answers", {}), "references": await self.references(p)}
+        skill='intake'
+        for _ in range(2):
+            try:
+                data = await self.call(p, skill, payload)
+                issues=intake_issues(data)
+            except ValueError as error:
+                if str(error)!='Модель вернула некорректный JSON':raise
+                issues=['Верни только корректный JSON-объект без пояснений вне JSON']
+                skill='intake_basic'
+            except HTTPException as error:
+                if not str(error.detail).startswith('Ответ обрезан.'):raise
+                issues=['Сократи ответ: верни только requirements, questions, notes. Каркас будет создан отдельным шагом.']
+                skill='intake_basic'
+            if not issues:break
+            payload={**payload,'validationErrors':issues,'instruction':'Исправь структуру ответа по контракту. Не добавляй необязательные вопросы.'}
+        ensure(not issues, "Некорректный разбор запроса: "+'; '.join(issues))
         for question in data["questions"]:
             required(question.get("field"), 80)
             required(question.get("question"), 2000)
@@ -359,10 +473,28 @@ class Programs:
         needed = {"type": "Какой тип программы?", "totalHours": "Какой объём в академических часах?", "audience": "Для кого программа?",
                   "entryLevel": "Что слушатели уже знают?", "format": "Какая форма обучения?", "assessment": "Как проходит итоговая аттестация?"}
         missing = [k for k in needed if not p["requirements"].get(k)]
+        # Do not ask to repeat known mandatory fields; preserve additional
+        # questions (e.g. company-specific constraints) outside this contract.
+        aliases={'аудитория':'audience','уровень':'entryLevel','объём':'totalHours','объем':'totalHours',
+                 'форма':'format','аттестация':'assessment','тип':'type'}
+        questions=[]
+        for question in p['questions']:
+            field=aliases.get(question['field'].lower(),question['field'])
+            if (field not in needed or field in missing) and not any(q['field']==field for q in questions):
+                questions.append({**question,'field':field})
+        p['questions']=questions
         for field in missing:
             if len(p["questions"]) < 5 and not any(q["field"] == field for q in p["questions"]):
                 p["questions"].append({"field": field, "question": needed[field]})
         p["state"] = "clarification" if missing or p["questions"] else "ready_for_skeleton"
+        if p["state"] == "ready_for_skeleton" and isinstance(data.get("skeleton"),dict):
+            candidate=data['skeleton']
+            report=await self.rules.call('inspectSkeleton',candidate,p['requirements'])
+            if not report['errors']:
+                self.revision(p)
+                p.update(skeleton=candidate,materials={},sections={},finalAssessment=None,approval=None,state='skeleton_review')
+            else:
+                p['notes'].append('Предложенный каркас требует уточнения сумм или связей. Используйте создание каркаса для исправления.')
         await self.save(p)
 
     async def skeleton(self, p):
@@ -392,9 +524,15 @@ class Programs:
             count = p["requirements"].get("testQuestionCount")
             quota = count // len(all_modules) + (all_modules.index(module) < count % len(all_modules)) if count else None
             for _ in range(2):
-                candidate = await self.call(p, "revise" if target else "module", {
+                refs = await self.references(p,module["title"])
+                if "research" not in p:
+                    p["research"] = {}
+                if module["id"] not in p["research"]:
+                    from .research import research
+                    p["research"][module["id"]] = await research(module["title"],refs)
+                candidate = await self.call(p, "revise" if target and p["materials"].get(module["id"]) else "module", {
                     "request": p["request"], "requirements": p["requirements"], "skeleton": p["skeleton"], "module": module,
-                    "questionQuota": quota, "referenceExcerpts": await self.references(p),
+                    "questionQuota": quota, "referenceExcerpts": refs, "webEvidence":p["research"][module["id"]],
                     "previous": p["materials"].get(module["id"]) if target else candidate,
                     "instruction": instruction, "validationErrors": issues})
                 issues = await self.rules.call("inspectModule", candidate, module, p["skeleton"])
@@ -404,6 +542,8 @@ class Programs:
             if target:
                 self.revision(p)
             p["materials"][module["id"]] = candidate
+            for source in candidate.get("sources",[]):
+                source["moduleId"] = module["id"]
             self.sources(p, candidate.get("sources"))
             await self.save(p)
         if not target:

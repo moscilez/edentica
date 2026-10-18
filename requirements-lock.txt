@@ -34,3 +34,6 @@ typing_extensions==4.16.0
 tzdata==2026.5
 uvicorn==0.54.0
 xlsxwriter==3.2.9
+cryptography==46.0.7
+cffi==2.1.1
+pycparser==3.11

@@ -35,7 +35,7 @@ def cli_environment():
     # The local generator needs CLI-managed sign-in only, never application DB
     # credentials, API keys, or the parent agent's thread metadata.
     for name in list(env):
-        if any(word in name.upper() for word in ("API_KEY", "DATABASE_URL", "POSTGRES_PASSWORD", "CLOUDRU_")) or name.startswith(("CODEX_THREAD", "CODEX_INTERNAL")):
+        if any(word in name.upper() for word in ("API_KEY", "ENCRYPTION_KEY", "DATABASE_URL", "POSTGRES_PASSWORD", "CLOUDRU_")) or name.startswith(("CODEX_THREAD", "CODEX_INTERNAL")):
             env.pop(name)
     return env
 
@@ -130,7 +130,11 @@ class CodexProvider:
                     raise ValueError("Codex должен вернуть JSON-объект")
                 return {"value": value, "usage": {"inputTokens": usage.get("input_tokens", 0),
                                                   "outputTokens": usage.get("output_tokens", 0)},
-                        "model": self.status()["model"]}
-            except BaseException:
+                        "model": self.status()["model"],"usageReported":all(k in usage for k in ('input_tokens','output_tokens'))}
+            except BaseException as error:
                 await terminate(process)
+                if isinstance(error,ValueError) and usage:
+                    from .usage import with_usage
+                    with_usage(error,{'model':self.status()['model'],'usage':{'inputTokens':usage.get('input_tokens',0),
+                        'outputTokens':usage.get('output_tokens',0)},'usageReported':all(k in usage for k in ('input_tokens','output_tokens'))})
                 raise

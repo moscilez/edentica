@@ -39,4 +39,6 @@ def client(postgres_url):
     from backend.app import create_app
     from fastapi.testclient import TestClient
     with TestClient(create_app(postgres_url), base_url="http://localhost") as test_client:
+        # Prepared fixtures are test-only; the production demo action stays disabled.
+        test_client.app.state.programs.allow_unconfigured = True
         yield test_client
