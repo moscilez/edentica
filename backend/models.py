@@ -11,6 +11,9 @@ from .net import public_request, public_url
 from .programs_helpers import ensure, required
 from .usage import reply_metadata, with_usage
 from fastapi import HTTPException
+from .config import Settings
+from .observability import logger
+import httpx
 
 
 def cipher():
@@ -48,6 +51,10 @@ class Models:
             if not await self.system_allowed(owner):
                 return {**fallback,'configured':False,'configurationHint':'Добавьте личное подключение ИИ. Доступ к ключу сервера выдаёт администратор.'}
             return fallback
+        try:Settings.load().validate_endpoint(row['base_url'],row['model'])
+        except ValueError as error:
+            return {'provider':row['name'],'model':row['model'],'configured':False,'localTesting':False,
+                    'blocked':True,'configurationHint':str(error)}
         return {"provider": row["name"], "model": row["model"], "configured": True, "localTesting": False,
                 "connectionId": row["id"], "personal": True}
 
@@ -57,6 +64,8 @@ class Models:
     async def save(self, owner, data):
         name, model = required(data.get("name"), 80), required(data.get("model"), 200)
         base = required(data.get("baseUrl"), 500).rstrip("/")
+        try:Settings.load().validate_endpoint(base,model)
+        except ValueError as error:ensure(False,str(error),403)
         try:
             parsed,_=public_url(base)
             ensure(not parsed.query,'Base URL указывается без параметров запроса')
@@ -87,6 +96,8 @@ class Models:
     async def complete(self, owner, skill, payload, fallback, selected=False):
         row = await self.selected(owner) if selected is False else selected
         if row:
+            try:Settings.load().validate_endpoint(row['base_url'],row['model'])
+            except ValueError as error:ensure(False,str(error),403)
             try:
                 key = cipher().decrypt(row["encrypted_key"].encode()).decode()
             except InvalidToken:
@@ -99,13 +110,24 @@ class Models:
 
 
 async def compatible(base, key, model, skill, payload, max_tokens=None, *, allow_private=False, json_mode=False):
-    code, _, raw = await public_request("POST", base.rstrip("/") + "/chat/completions",
-        headers={"Authorization": "Bearer " + key}, timeout=150, limit=3000000, allow_private=allow_private,
-        payload={"model": model, "stream": False, "temperature": .2,
+    request_payload={"model": model, "stream": False, "temperature": .2,
                  **({'max_tokens':max_tokens} if max_tokens is not None else {}),
                  **({'response_format':{'type':'json_object'}} if json_mode else {}),
                  "messages": [{"role": "system", "content": skill},
-                              {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}]})
+                              {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}]}
+    for attempt in range(3):
+        try:
+            code, headers, raw = await public_request("POST", base.rstrip("/") + "/chat/completions",
+        headers={"Authorization": "Bearer " + key}, timeout=150, limit=3000000, allow_private=allow_private,
+                payload=request_payload)
+        except (httpx.TransportError,TimeoutError):
+            if attempt==2:raise HTTPException(503,'Нет связи с моделью. Результаты сохранены; повторите этап позже.') from None
+            code=503;headers={}
+        if code not in (408,429,500,502,503,504) or attempt==2:break
+        logger.warning('llm_retry',extra={'attempt':attempt+1,'status':code})
+        retry=headers.get('retry-after','')
+        delay=min(float(retry),5) if retry.isdigit() else .5*(2**attempt)
+        await asyncio.sleep(delay)
     ensure(200 <= code < 300, f"Модель вернула HTTP {code}. Проверьте адрес, модель и квоту.", 502)
     metadata={}
     try:

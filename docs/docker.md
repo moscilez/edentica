@@ -49,12 +49,12 @@ HTTP_PORT=8000
 Модель сервера:
 
 ```dotenv
-LLM_BASE_URL=https://your-issued-gateway.example/v1
+LLM_BASE_URL=https://hub.gigaschool.ru/api/v1/llm/v1
 LLM_API_KEY=your-issued-key
-LLM_MODEL=exact-model-id
+LLM_MODEL=GigaChat/GigaChat-3-Pro
 ```
 
-Либо используйте CLOUDRU_API_KEY и CLOUDRU_MODEL. В текущем развёртывании по указанию владельца SYSTEM_LLM_SHARED_ACCESS=1: серверная модель доступна всем зарегистрированным методистам, ключ остаётся на сервере. Внутренних токенных бюджетов нет; квоты поставщика сохраняются. Для ограничения доступа отключите этот флаг и укажите SYSTEM_LLM_ALLOWED_USERS=uuid1,uuid2 либо используйте личные подключения. Произвольные пользовательские OpenAI-совместимые подключения добавляются через настройки профиля и шифруются APP_ENCRYPTION_KEY. Сохраняйте этот ключ неизменным между релизами.
+Для Cloud.ru Evolution используйте CLOUDRU_API_KEY и CLOUDRU_MODEL (адрес https://foundation-models.api.cloud.ru/v1). Алиасы OPENAI_BASE_URL/OPENAI_API_KEY/OPENAI_MODEL означают совместимый протокол, а не разрешение API OpenAI. Приоритет: LLM_* → OPENAI_* → CLOUDRU_*. Не смешивайте настройки разных провайдеров. Точный контракт: [workflow.md](workflow.md#конфигурация). В текущем развёртывании по указанию владельца SYSTEM_LLM_SHARED_ACCESS=1: серверная модель доступна всем зарегистрированным методистам, ключ остаётся на сервере. Внутренних токенных бюджетов нет; квоты поставщика сохраняются. Для ограничения доступа отключите этот флаг и укажите SYSTEM_LLM_ALLOWED_USERS=uuid1,uuid2 либо используйте личные подключения. Пользовательские подключения к разрешённым в режиме хакатона моделям добавляются через настройки профиля и шифруются APP_ENCRYPTION_KEY. Сохраняйте этот ключ неизменным между релизами.
 Локальный Codex CLI через ChatGPT работает только в локальном Python-сервере на loopback; Windows-авторизация Codex не копируется на публичную ВМ.
 
 ## Сборка и запуск
@@ -63,6 +63,7 @@ LLM_MODEL=exact-model-id
 docker compose --env-file .env.docker config --quiet
 docker compose --env-file .env.docker build
 docker compose --env-file .env.docker up -d --wait
+docker compose --env-file .env.docker exec -T backend python -m backend.preflight
 docker compose --env-file .env.docker ps
 curl -f http://127.0.0.1:8000/api/health
 docker compose --env-file .env.docker logs --tail=100 backend frontend

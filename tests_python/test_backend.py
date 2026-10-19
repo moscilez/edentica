@@ -6,11 +6,11 @@ import importlib.util
 import json
 from pathlib import Path
 import sqlite3
-import subprocess
 import time
 from uuid import uuid4
 from zipfile import ZipFile
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 import psycopg
 from psycopg.types.json import Jsonb
@@ -72,8 +72,8 @@ def test_authentication_security_and_static(client):
 
 
 def test_passwords_compatible_with_node_scrypt():
-    result = subprocess.check_output(["node", "--input-type=module", "-e",
-        "import {scryptSync} from 'node:crypto';console.log('abcd:'+scryptSync('password-test-long','abcd',64).toString('hex'))"], text=True).strip()
+    # Independent vector produced by Node crypto.scryptSync(password, 'abcd', 64).
+    result = 'abcd:ddb039a1cc837abf2ef71e7dd2c00820730290bec0d4ba601cbb9302645f89afe04db7c7f4978981ea1bd30fb320c85c123a29c0d166a93fa7ec0722cc2dd606'
     assert check_password("password-test-long", result)
     assert not check_password("bad-password", result)
     assert not check_password("x", "invalid")
@@ -129,7 +129,7 @@ def test_real_orchestration_with_mock_provider(postgres_url):
     async def complete(skill, payload):
         calls.append(skill)
         if "Навык 1" in skill:
-            value = {"requirements": {"type": "general", "totalHours": 16, "audience": "Школьники", "entryLevel": "Без опыта", "format": "Очно", "assessment": "Проект"},
+            value = {"requirements": {"type": "general", "totalHours": 16, "audience": "Школьники", "entryLevel": "Без опыта" if payload["answers"].get("level") else None, "format": "Очно", "assessment": "Проект"},
                      "questions": [] if payload["answers"].get("level") else [{"field": "level", "question": "Какой входной уровень?"}], "notes": []}
         elif "Навык 2" in skill:
             value = copy.deepcopy(fixture["skeleton"])
@@ -281,16 +281,16 @@ def test_cloudru_http_contract_without_real_calls(monkeypatch):
         {"choices": [{"message": {"content": "{}"}, "finish_reason": "length"}]},
         {"choices": [{"message": {"content": "invalid"}, "finish_reason": "stop"}]},
     ]
-    def handle(request):
-        assert str(request.url) == "https://foundation-models.api.cloud.ru/v1/chat/completions"
-        assert request.headers["Authorization"] == "Bearer test-key-only"
-        assert json.loads(request.content)["model"] == "test-model-only"
-        return httpx.Response(200, json=replies.pop(0))
-    monkeypatch.setattr(cloudru, "httpx", SimpleNamespace(AsyncClient=lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(handle), **kwargs)))
+    async def handle(method,url,**kwargs):
+        assert url == "https://foundation-models.api.cloud.ru/v1/chat/completions"
+        assert kwargs['headers']["Authorization"] == "Bearer test-key-only"
+        assert kwargs['payload']["model"] == "test-model-only"
+        return 200,{},json.dumps(replies.pop(0)).encode()
+    monkeypatch.setattr('backend.models.public_request',handle)
     result = asyncio.run(cloudru.complete("test instruction", {"request": "test"}))
     assert result["value"]["ok"]
     assert result["usage"] == {"inputTokens": 20, "outputTokens": 8}
-    with pytest.raises(ValueError, match="обрезан"):
+    with pytest.raises(HTTPException, match="обрезан"):
         asyncio.run(cloudru.complete("test", {}))
     with pytest.raises(ValueError, match="JSON"):
         asyncio.run(cloudru.complete("test", {}))

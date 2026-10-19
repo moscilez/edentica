@@ -15,6 +15,17 @@ sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
 
+@pytest.fixture(autouse=True)
+def isolated_model_environment(monkeypatch):
+    """Unit tests never inherit a developer's or a deployed server's paid model."""
+    monkeypatch.setenv('EDENTICA_MODE', 'local')
+    monkeypatch.setenv('LLM_PROVIDER', 'cloudru')
+    for prefix in ('LLM', 'OPENAI', 'CLOUDRU'):
+        for suffix in ('BASE_URL', 'API_KEY', 'MODEL'):
+            monkeypatch.setenv(f'{prefix}_{suffix}', '')
+    monkeypatch.setenv('BRAVE_SEARCH_API_KEY', '')
+
+
 @pytest.fixture(scope="session")
 def postgres_url():
     settings = conninfo_to_dict(os.environ.get("TEST_DATABASE_URL") or os.environ["DATABASE_URL"])

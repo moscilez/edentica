@@ -21,7 +21,7 @@ ROOT=Path(__file__).resolve().parent.parent
 def bundle():
     data=io.BytesIO()
     with tarfile.open(fileobj=data,mode='w:gz') as archive:
-        files=['Dockerfile','compose.yaml','package.json','requirements.txt','requirements-dev.txt','requirements-lock.txt','.env.docker.example','.dockerignore']
+        files=['Dockerfile','compose.yaml','readme.md','package.json','requirements.txt','requirements-dev.txt','requirements-lock.txt','.env.docker.example','.dockerignore']
         for directory in ('backend','public','src','scripts','templates','deploy','tests_python','docs'):
             files.extend(str(p.relative_to(ROOT)) for p in (ROOT/directory).rglob('*') if p.is_file() and '__pycache__' not in p.parts and p.suffix!='.pyc')
         for name in files:
@@ -100,14 +100,16 @@ print('Release staged; model credentials loaded on VM only.')
             'start':prefix+'up -d --wait >logs/start.log 2>&1',
             'status':prefix+'ps --format json',
             'stop-test':prefix+'--profile test stop test-db',
+            'preflight':prefix+'exec -T backend python -m backend.preflight',
             'pause-frontend':prefix+'stop frontend',
             'http-smoke':"python3 -c "+shlex.quote("import urllib.request,json; urls=['http://127.0.0.1:8000/','http://127.0.0.1:8000/api/health']; results=[]\nfor url in urls:\n r=urllib.request.urlopen(url,timeout=10); b=r.read(200000); results.append({'path':url.split(':8000')[-1],'status':r.status,'bytes':len(b),'edentica':('Эдентика'.encode() in b),'body':b.decode() if url.endswith('/api/health') else None})\nprint(json.dumps(results,ensure_ascii=False))"),
             'logs':'cd '+shlex.quote(state['path'])+' && tail -60 logs/build.log; tail -45 '+shlex.quote(state['path'])+'/logs/test.log',
         }
         actions['release']='cd '+shlex.quote(state['path'])+' && docker compose --env-file .env.docker --profile test build >logs/build.log 2>&1 && docker compose --env-file .env.docker --profile test run --rm test >logs/test.log 2>&1 && docker compose --env-file .env.docker up -d --wait >logs/start.log 2>&1'
         actions['verify-gateway']=prefix+'exec -T backend python - --provider gateway < scripts/verify-codex-generation.py >logs/gateway-check.log 2>&1'
+        actions['verify-workflow']=prefix+'run --rm --no-deps -T backend python - --provider gateway --workflow'+(' --case bank72' if config.get('case')=='bank72' else '')+(' --full' if config.get('full') else '')+' < scripts/verify-codex-generation.py >logs/workflow-check.log 2>&1'
         action=config['action']
-        if action in ('build','test','start','release','verify-gateway'):
+        if action in ('build','test','start','release','verify-gateway','verify-workflow'):
             if action in ('start','release'):
                 code,out,err=run('mkdir -p ~/.config/edentica && if [ ! -e ~/.config/edentica/runtime.env ]; then cp '+shlex.quote(state['path'])+'/.env.docker ~/.config/edentica/runtime.env; chmod 600 ~/.config/edentica/runtime.env; fi')
             logfile=action+'.log'
@@ -125,12 +127,30 @@ print('Release staged; model credentials loaded on VM only.')
             for relative in config['files']:
                 local=(ROOT/relative).resolve()
                 if not local.is_relative_to(ROOT) or (relative.startswith(('.env','data/','output/','.git')) and relative not in ('.env.docker.example','.env.example')):raise ValueError('Forbidden path')
+                parts=(state['path']+'/'+relative.replace('\\','/')).split('/')[:-1]
+                for i in range(1,len(parts)+1):
+                    parent='/'.join(parts[:i])
+                    try:sftp.stat(parent)
+                    except FileNotFoundError:sftp.mkdir(parent)
                 sftp.put(str(local),state['path']+'/'+relative)
             sftp.close();print('Source patch uploaded.')
         elif action=='smoke-model':
             source="import asyncio,json;from backend.cloudru import complete;r=asyncio.run(complete('Return only a JSON object with ok set to true.',{}));print(json.dumps({'ok':r['value'].get('ok') is True,'model':r['model'],'usage':r['usage']}))"
             code,out,err=run(prefix+'exec -T backend python -c '+shlex.quote(source),timeout=160)
             print(out[:1000]);print(err[-1000:])
+        elif action=='fetch-check':
+            check_name='gateway-real-check'+('-bank72' if config.get('case')=='bank72' else '')
+            source="import io,sys,zipfile;from pathlib import Path;p=Path('/app/data/"+check_name+"');b=io.BytesIO();z=zipfile.ZipFile(b,'w',zipfile.ZIP_DEFLATED);[z.write(f,f.name) for f in p.iterdir() if f.is_file()];z.close();sys.stdout.buffer.write(b.getvalue())"
+            _,out,err=team.exec_command(prefix+'exec -T backend python -c '+shlex.quote(source),timeout=40)
+            blob=out.read(20000001)
+            if out.channel.recv_exit_status() or len(blob)>20000000:raise RuntimeError('Cannot fetch bounded verification artifacts')
+            import zipfile
+            destination=ROOT/'output'/check_name;destination.mkdir(parents=True,exist_ok=True)
+            with zipfile.ZipFile(io.BytesIO(blob)) as z:
+                for name in z.namelist():
+                    if Path(name).name!=name:raise ValueError('Unexpected artifact path')
+                    (destination/name).write_bytes(z.read(name))
+            print(json.dumps({'downloaded':sorted(z.namelist()),'directory':str(destination)}))
         elif action=='backup-db':
             name='logs/db-before-usage-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'.dump'
             code,out,err=run(prefix+'exec -T db pg_dump -U edentica -d edentica -Fc > '+shlex.quote(name))
@@ -140,14 +160,14 @@ print('Release staged; model credentials loaded on VM only.')
             print('Database backup verified: '+state['path']+'/'+name)
         elif action=='verify-runtime':
             import hashlib
-            names=['backend/app.py','backend/programs.py','backend/models.py','backend/cloudru.py',
-                   'backend/codex_provider.py','backend/usage.py','backend/schema.sql',
-                   'public/usage.js','public/workspace.js','public/workspace.css','public/program-studio.js']
-            expected={name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in names}
-            source="import json,hashlib;from pathlib import Path;expected="+repr(expected)+";bad=[n for n,h in expected.items() if hashlib.sha256(Path(n).read_bytes()).hexdigest()!=h];print(json.dumps({'checkedFiles':len(expected),'mismatches':bad}))"
+            names=[p.relative_to(ROOT).as_posix() for p in (ROOT/'backend').rglob('*')
+                   if p.is_file() and p.suffix in ('.py','.json','.sql')]
+            names+=['public/usage.js','public/workspace.js','public/workspace.css','public/program-studio.js']
+            expected={name:hashlib.sha256((ROOT/name).read_bytes().replace(b'\r\n',b'\n')).hexdigest() for name in names}
+            source="import json,hashlib;from pathlib import Path;expected="+repr(expected)+";bad=[n for n,h in expected.items() if hashlib.sha256(Path(n).read_bytes().replace(b'\\r\\n',b'\\n')).hexdigest()!=h];print(json.dumps({'checkedFiles':len(expected),'mismatches':bad}))"
             code,out,err=run(prefix+'exec -T backend python -c '+shlex.quote(source))
             print(out);print(err[:500])
-            source="import urllib.request,hashlib,json;r=urllib.request.urlopen('http://127.0.0.1:8000/usage.js',timeout=10);print(json.dumps({'usageAssetStatus':r.status,'usageAssetMatches':hashlib.sha256(r.read()).hexdigest()=="+repr(expected['public/usage.js'])+"}))"
+            source="import urllib.request,hashlib,json;r=urllib.request.urlopen('http://127.0.0.1:8000/usage.js',timeout=10);print(json.dumps({'usageAssetStatus':r.status,'usageAssetMatches':hashlib.sha256(r.read().replace(b'\\r\\n',b'\\n')).hexdigest()=="+repr(expected['public/usage.js'])+"}))"
             code,out,err=run('python3 -c '+shlex.quote(source));print(out);print(err[:500])
         elif action=='uptime-status':
             code,out,err=run('systemctl is-enabled docker; systemctl is-active docker')

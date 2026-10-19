@@ -150,7 +150,8 @@ def create_app(database_url=None, complete=None):
     @app.get("/api/health")
     async def health():
         await db("one", "SELECT 1")
-        return {"service": "edentica", "status": "ready", "backend": "python", "database": "postgresql"}
+        return {"service": "edentica", "status": "ready", "backend": "python", "database": "postgresql",
+                'workflowVersion':2,'modelConfigured':bool(app.state.programs.provider_status()['configured'])}
 
     @app.get("/api/me")
     async def me(request: Request):
@@ -271,12 +272,16 @@ def create_app(database_url=None, complete=None):
         from .lesson_exports import export_lesson
         return await asyncio.to_thread(export_lesson,program,required(data.get("lessonId"),100),data.get("format"))
 
+    @app.api_route('/api/programs',methods=['GET','POST'])
     @app.api_route("/api/agent", methods=["GET", "POST"])
     async def agent(request: Request):
         account = await user(request)
         ensure(account["role"] == "methodist", "Создание программ доступно методисту",403)
         data = await body(request) if request.method == "POST" else {}
-        action = required(data.get("action"), 40) if request.method == "POST" else "status"
+        if request.url.path=='/api/programs':
+            data=await body(request) if request.method=='POST' else dict(request.query_params)
+            action=data.get('action') or ('workflow' if request.method=='POST' else 'get' if data.get('id') else 'list')
+        else:action = required(data.get("action"), 40) if request.method == "POST" else "status"
         try:
             result = await app.state.programs.action(action, data, account)
         except ValueError as error:
