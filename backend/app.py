@@ -335,7 +335,18 @@ def create_app(database_url=None, complete=None):
         account = await user(request)
         data = await body(request)
         ensure(data.get("confirm") is True, "Подтвердите удаление материала")
-        ensure(await db("execute", "DELETE FROM learning_materials WHERE id=%s AND user_id=%s", (id, account["id"])), "Материал не найден", 404)
+        def delete_material():
+            with app.state.db.pool.connection() as connection:
+                # Serialize with program creation: a reference must not disappear
+                # between ownership validation and inserting its program.
+                connection.execute('SELECT id FROM users WHERE id=%s FOR UPDATE',(account['id'],))
+                ensure(connection.execute('SELECT id FROM learning_materials WHERE id=%s AND user_id=%s',
+                    (id,account['id'])).fetchone(),'Материал не найден',404)
+                used=connection.execute("SELECT id FROM program_projects WHERE owner=%s AND document->'referenceIds' ? %s LIMIT 1",
+                    (account['id'],id)).fetchone()
+                ensure(not used,'Этот референс уже используется в программе. Его удаление нарушит связь с исходным документом.',409)
+                connection.execute('DELETE FROM learning_materials WHERE id=%s AND user_id=%s',(id,account['id']))
+        await asyncio.to_thread(delete_material)
         return {"ok": True}
 
     @app.api_route("/api/{path:path}", methods=["GET", "POST"])

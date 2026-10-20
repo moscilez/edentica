@@ -121,6 +121,28 @@ def test_materials_ownership_demo_exports_and_revision(client):
     assert agent(client, "create", request="Курс", referenceIds=[ref]).status_code == 422
 
 
+def test_reference_removal_replacement_and_in_use_protection(client):
+    register(client)
+    def upload():
+        response=client.post('/api/materials',headers=HEADERS,json={'name':'reference.txt','data':base64.b64encode(b'Reference text').decode()})
+        assert response.status_code==201,response.text
+        return response.json()['id']
+    original=upload()
+    path='/api/materials/'+original
+    assert client.post(path+'/remove',headers=HEADERS,json={}).status_code==422
+    assert client.post(path+'/remove',headers=HEADERS,json={'confirm':True}).status_code==200
+    assert client.get(path).status_code==404
+    replacement=upload()
+    assert replacement!=original
+    project=agent(client,'create',request='Программа по Python',referenceIds=[replacement])
+    assert project.status_code==201,project.text
+    path='/api/materials/'+replacement
+    assert client.post(path+'/remove',headers=HEADERS,json={'confirm':True}).status_code==409
+    assert client.get(path).status_code==200
+    register(client)
+    assert client.post(path+'/remove',headers=HEADERS,json={'confirm':True}).status_code==404
+
+
 def test_real_orchestration_with_mock_provider(postgres_url,monkeypatch):
     rules = Rules()
     fixture = asyncio.run(rules.call("demonstration"))
