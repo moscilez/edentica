@@ -11,3 +11,8 @@ node_modules
 .venv
 __pycache__
 .pytest_cache
+logs
+docs
+tests
+server.mjs
+*.tar.gz

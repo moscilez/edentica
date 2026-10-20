@@ -6,11 +6,11 @@ import importlib.util
 import json
 from pathlib import Path
 import sqlite3
-import subprocess
 import time
 from uuid import uuid4
 from zipfile import ZipFile
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 import psycopg
 from psycopg.types.json import Jsonb
@@ -50,7 +50,8 @@ def wait(client, id):
 def test_authentication_security_and_static(client):
     assert client.get("/api/health").json()["database"] == "postgresql"
     assert "<title>Эдентика</title>" in client.get("/").text
-    for asset in ("favicon.svg", "brand.svg", "program-studio.js", "program-studio.css", "program-editor.js"):
+    for asset in ("favicon.svg", "favicon.png", "favicon.ico", "brand.svg", "brand.png",
+                  "program-studio.js", "program-studio.css", "program-editor.js"):
         assert client.get("/" + asset).status_code == 200
     assert agent(client, "list").status_code == 401
     account, email = register(client)
@@ -71,8 +72,8 @@ def test_authentication_security_and_static(client):
 
 
 def test_passwords_compatible_with_node_scrypt():
-    result = subprocess.check_output(["node", "--input-type=module", "-e",
-        "import {scryptSync} from 'node:crypto';console.log('abcd:'+scryptSync('password-test-long','abcd',64).toString('hex'))"], text=True).strip()
+    # Independent vector produced by Node crypto.scryptSync(password, 'abcd', 64).
+    result = 'abcd:ddb039a1cc837abf2ef71e7dd2c00820730290bec0d4ba601cbb9302645f89afe04db7c7f4978981ea1bd30fb320c85c123a29c0d166a93fa7ec0722cc2dd606'
     assert check_password("password-test-long", result)
     assert not check_password("bad-password", result)
     assert not check_password("x", "invalid")
@@ -120,29 +121,61 @@ def test_materials_ownership_demo_exports_and_revision(client):
     assert agent(client, "create", request="Курс", referenceIds=[ref]).status_code == 422
 
 
-def test_real_orchestration_with_mock_provider(postgres_url):
+def test_reference_removal_replacement_and_in_use_protection(client):
+    register(client)
+    def upload():
+        response=client.post('/api/materials',headers=HEADERS,json={'name':'reference.txt','data':base64.b64encode(b'Reference text').decode()})
+        assert response.status_code==201,response.text
+        return response.json()['id']
+    original=upload()
+    path='/api/materials/'+original
+    assert client.post(path+'/remove',headers=HEADERS,json={}).status_code==422
+    assert client.post(path+'/remove',headers=HEADERS,json={'confirm':True}).status_code==200
+    assert client.get(path).status_code==404
+    replacement=upload()
+    assert replacement!=original
+    project=agent(client,'create',request='Программа по Python',referenceIds=[replacement])
+    assert project.status_code==201,project.text
+    path='/api/materials/'+replacement
+    assert client.post(path+'/remove',headers=HEADERS,json={'confirm':True}).status_code==409
+    assert client.get(path).status_code==200
+    register(client)
+    assert client.post(path+'/remove',headers=HEADERS,json={'confirm':True}).status_code==404
+
+
+def test_real_orchestration_with_mock_provider(postgres_url,monkeypatch):
     rules = Rules()
     fixture = asyncio.run(rules.call("demonstration"))
     sections = asyncio.run(rules.call("config"))["templateSections"]
+    async def probe(source):return {'access':'reachable','status':'unverified'}
+    monkeypatch.setattr('backend.programs.probe_source',probe)
     calls = []
     async def complete(skill, payload):
         calls.append(skill)
         if "Навык 1" in skill:
-            value = {"requirements": {"type": "general", "totalHours": 16, "audience": "Школьники", "entryLevel": "Без опыта", "format": "Очно", "assessment": "Проект"},
+            value = {"requirements": {"type": "general", "totalHours": 16, "audience": "Школьники", "entryLevel": "Без опыта" if payload["answers"].get("level") else None, "format": "Очно", "assessment": "Проект"},
                      "questions": [] if payload["answers"].get("level") else [{"field": "level", "question": "Какой входной уровень?"}], "notes": []}
         elif "Навык 2" in skill:
             value = copy.deepcopy(fixture["skeleton"])
-        elif "Навык 3" in skill or "Навык 5" in skill:
-            value = copy.deepcopy(fixture["materials"][payload["module"]["id"]])
-            if payload.get("instruction"):
-                value["summary"] = "Точечно обновлённое содержание"
+            value['modules'][0]['title']='Основы Python'
+        elif "Навык 3" in skill:
+            topic=payload['module']['topics'][0]
+            original=next(iter(fixture['materials'].values()))
+            if 'JSON-объект лекции' in skill:
+                value=copy.deepcopy(original['lectures'][0])
+                value.update(topicId=topic['id'],competencyIds=topic['competencyIds'])
+                if payload.get('instruction'):value['title']='Точечно обновлённое содержание'
+            else:
+                value={}
+                for kind in ('questions','seminars'):
+                    item=copy.deepcopy(original[kind][0]);item.update(topicId=topic['id'],competencyIds=topic['competencyIds']);value[kind]=[item]
         else:
             value = {"sections": {x: "Раздел учебной программы для школьников" for x in sections["general"]},
                      "finalAssessment": fixture["finalAssessment"], "sources": fixture["sources"]}
         return {"value": value, "usage": {"inputTokens": 100, "outputTokens": 50}, "model": "mock-only"}
     with TestClient(create_app(postgres_url, complete), base_url="http://localhost") as client:
         register(client)
-        p = agent(client, "create", request="Курс Python на 16 часов").json()
+        p = agent(client, "create", request="Общеразвивающий курс Python на 16 часов").json()
         id = p["id"]
         assert agent(client, "generate", id=id).status_code == 422
         agent(client, "analyze", id=id)
@@ -159,12 +192,12 @@ def test_real_orchestration_with_mock_provider(postgres_url):
         assert p["job"]["state"] == "completed", p["job"]
         assert p["report"]["passed"], p["report"]
         assert p["usage"]["inputTokens"] == len(calls) * 100
-        untouched = copy.deepcopy(p["materials"]["М2"])
-        agent(client, "revise_module", id=id, moduleId="М1", instruction="Обновите пояснение")
+        untouched = copy.deepcopy(p["materials"]["M2"])
+        agent(client, "revise_module", id=id, moduleId="M1", instruction="Обновите пояснение")
         p = wait(client, id)
-        assert p["materials"]["М2"] == untouched
-        assert p["materials"]["М1"]["summary"] == "Точечно обновлённое содержание"
-        assert p["history"][-1]["materials"]["М1"]["summary"] != p["materials"]["М1"]["summary"]
+        assert p["materials"]["M2"] == untouched
+        assert p["materials"]["M1"]["summary"].strip() == "Точечно обновлённое содержание"
+        assert p["history"][-1]["materials"]["M1"]["summary"] != p["materials"]["M1"]["summary"]
         assert agent(client, "export", id=id, format="gift").status_code == 200
         source = p["sources"][0]
         assert source["verification"]["status"] == "unverified"
@@ -280,16 +313,16 @@ def test_cloudru_http_contract_without_real_calls(monkeypatch):
         {"choices": [{"message": {"content": "{}"}, "finish_reason": "length"}]},
         {"choices": [{"message": {"content": "invalid"}, "finish_reason": "stop"}]},
     ]
-    def handle(request):
-        assert str(request.url) == "https://foundation-models.api.cloud.ru/v1/chat/completions"
-        assert request.headers["Authorization"] == "Bearer test-key-only"
-        assert json.loads(request.content)["model"] == "test-model-only"
-        return httpx.Response(200, json=replies.pop(0))
-    monkeypatch.setattr(cloudru, "httpx", SimpleNamespace(AsyncClient=lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(handle), **kwargs)))
+    async def handle(method,url,**kwargs):
+        assert url == "https://foundation-models.api.cloud.ru/v1/chat/completions"
+        assert kwargs['headers']["Authorization"] == "Bearer test-key-only"
+        assert kwargs['payload']["model"] == "test-model-only"
+        return 200,{},json.dumps(replies.pop(0)).encode()
+    monkeypatch.setattr('backend.models.public_request',handle)
     result = asyncio.run(cloudru.complete("test instruction", {"request": "test"}))
     assert result["value"]["ok"]
     assert result["usage"] == {"inputTokens": 20, "outputTokens": 8}
-    with pytest.raises(ValueError, match="обрезан"):
+    with pytest.raises(HTTPException, match="обрезан"):
         asyncio.run(cloudru.complete("test", {}))
     with pytest.raises(ValueError, match="JSON"):
         asyncio.run(cloudru.complete("test", {}))

@@ -1,4 +1,11 @@
 import io, json, sys, zipfile
+import os
+
+# Keep hostile parsers within a child-process budget on Linux servers.
+if os.name != 'nt':
+    import resource
+    resource.setrlimit(resource.RLIMIT_AS,(384*1024*1024,384*1024*1024))
+    resource.setrlimit(resource.RLIMIT_CPU,(15,15))
 
 kind = sys.argv[1]
 data = sys.stdin.buffer.read()
@@ -10,7 +17,14 @@ elif kind == 'pdf':
     if not data.startswith(b'%PDF-'): raise ValueError('Invalid PDF')
     reader = PdfReader(io.BytesIO(data))
     if reader.is_encrypted or len(reader.pages) > 100: raise ValueError('Unsupported PDF')
-    result = '\n\n'.join(page.extract_text() or '' for page in reader.pages)
+    parts=[]
+    extracted=0
+    for page in reader.pages:
+        text=page.extract_text() or ''
+        parts.append(text[:51000-extracted])
+        extracted+=len(parts[-1])
+        if extracted>50000:break
+    result = '\n\n'.join(parts)
 else:
     if not data.startswith(b'PK'): raise ValueError('Invalid Office file')
     archive = zipfile.ZipFile(io.BytesIO(data))

@@ -1,61 +1,132 @@
 name: edentica
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+x-postgres: &pg
+  image: postgres:18-bookworm
+  environment:
+    POSTGRES_DB: edentica
+    POSTGRES_USER: edentica
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U edentica -d edentica"]
+    interval: 5s
+    timeout: 3s
+    retries: 20
+  logging: *logging
 services:
-  postgres:
-    image: postgres:18-bookworm
-    environment:
-      POSTGRES_DB: edentica
-      POSTGRES_USER: edentica
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}
+  db:
+    <<: *pg
     volumes:
       - edentica-postgres:/var/lib/postgresql
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U edentica -d edentica"]
-      interval: 5s
-      timeout: 3s
-      retries: 15
-    logging: &logging
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-  edentica:
-    build: .
+    mem_limit: 512m
+  backend:
+    build:
+      context: .
+      target: runtime
     init: true
-    ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-3000}:3000"
-    environment:
+    environment: &backend-env
       HOST: 0.0.0.0
       PORT: 3000
       EDENTICA_MODE: hackathon
       LLM_PROVIDER: cloudru
-      DATABASE_URL: postgresql://edentica:${POSTGRES_PASSWORD}@postgres:5432/edentica
-      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
+      DATABASE_URL: postgresql://edentica:${POSTGRES_PASSWORD}@db:5432/edentica
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8000}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-0}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Set APP_ENCRYPTION_KEY}
       CLOUDRU_API_KEY: ${CLOUDRU_API_KEY:-}
       CLOUDRU_MODEL: ${CLOUDRU_MODEL:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_STRUCTURED_OUTPUT: ${LLM_STRUCTURED_OUTPUT:-1}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      SYSTEM_LLM_ALLOWED_USERS: ${SYSTEM_LLM_ALLOWED_USERS:-}
+      SYSTEM_LLM_SHARED_ACCESS: ${SYSTEM_LLM_SHARED_ACCESS:-0}
+      SYSTEM_LLM_ALLOW_PRIVATE_NETWORK: ${SYSTEM_LLM_ALLOW_PRIVATE_NETWORK:-0}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
       CLOUDRU_INPUT_RUB_PER_MILLION: ${CLOUDRU_INPUT_RUB_PER_MILLION:-}
       CLOUDRU_OUTPUT_RUB_PER_MILLION: ${CLOUDRU_OUTPUT_RUB_PER_MILLION:-}
-      ADMIN_USER_ID: ${ADMIN_USER_ID:-}
     depends_on:
-      postgres:
+      db:
         condition: service_healthy
     volumes:
       - edentica-data:/app/data
     restart: unless-stopped
     stop_grace_period: 45s
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    mem_limit: 768m
+    pids_limit: 100
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
     logging: *logging
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/api/health', timeout=3)"]
       interval: 15s
       timeout: 5s
-      start_period: 20s
+      start_period: 25s
       retries: 5
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-8000}:8000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 96m
+    pids_limit: 50
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8000/api/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+  test-db:
+    <<: *pg
+    profiles: [test]
+    environment:
+      POSTGRES_DB: edentica
+      POSTGRES_USER: edentica
+      POSTGRES_PASSWORD: test-only-database-password
+    tmpfs:
+      - /var/lib/postgresql
+    mem_limit: 512m
+  test:
+    profiles: [test]
+    build:
+      context: .
+      target: test
+    init: true
+    environment:
+      <<: *backend-env
+      DATABASE_URL: postgresql://edentica:test-only-database-password@test-db:5432/edentica
+      TEST_DATABASE_URL: postgresql://edentica:test-only-database-password@test-db:5432/edentica
+      APP_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      CLOUDRU_API_KEY: ""
+      CLOUDRU_MODEL: ""
+      LLM_BASE_URL: ""
+      LLM_API_KEY: ""
+      LLM_MODEL: ""
+      OPENAI_BASE_URL: ""
+      OPENAI_API_KEY: ""
+      OPENAI_MODEL: ""
+      BRAVE_SEARCH_API_KEY: ""
+      COOKIE_SECURE: "0"
+      PUBLIC_URL: http://localhost:3000
+    depends_on:
+      test-db:
+        condition: service_healthy
+    mem_limit: 768m
 volumes:
   edentica-data:
   edentica-postgres:

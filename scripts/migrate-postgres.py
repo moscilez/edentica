@@ -8,21 +8,16 @@ import json
 import os
 from pathlib import Path
 import sqlite3
-import subprocess
+import sys
 from dotenv import load_dotenv
 import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0,str(ROOT))
+from backend.validation import digest
 load_dotenv(ROOT / ".env")
-
-
-def digest(value):
-    result = subprocess.run([os.getenv("NODE_PATH") or "node", str(ROOT / "scripts/program-rules.mjs")],
-                            input=json.dumps({"operation": "digest", "args": [value]}, ensure_ascii=False) + "\n",
-                            capture_output=True, text=True, encoding="utf-8", check=True, timeout=15)
-    return json.loads(result.stdout)["value"]
 
 
 def migrate_approval(original, stored):

@@ -1,27 +1,19 @@
-"""Run pure JS validators without duplicating the educational rules during migration."""
-import asyncio
+"""In-process Python validation and versioned skill instructions."""
+import copy
 import json
-import os
 from .database import ROOT
+from .validation import CONFIG,digest,inspect_skeleton,inspect_module,inspect_program
 
 
 class Rules:
-    async def call(self, operation, *args):
-        process = await asyncio.create_subprocess_exec(
-            os.getenv("NODE_PATH") or "node", str(ROOT / "scripts/program-rules.mjs"),
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, _ = await asyncio.wait_for(process.communicate(
-                (json.dumps({"operation": operation, "args": args}, ensure_ascii=False) + "\n").encode()), 15)
-        except BaseException:
-            if process.returncode is None:
-                process.kill()
-            await process.wait()
-            raise
-        if process.returncode:
-            raise RuntimeError("Не удалось выполнить проверку программы")
-        result = json.loads(stdout)
-        if "error" in result:
-            raise ValueError(result["error"])
-        return result["value"]
+    async def call(self,operation,*args):
+        operations={'digest':digest,'inspectSkeleton':inspect_skeleton,'inspectModule':inspect_module,'inspectProgram':inspect_program}
+        if operation=='config':return copy.deepcopy(CONFIG)
+        if operation=='demonstration':
+            return json.loads((ROOT/'tests_python/fixtures/program.json').read_text(encoding='utf-8'))
+        if operation not in operations:raise ValueError('Неизвестная операция проверки')
+        result=operations[operation](*args)
+        if operation=='inspectProgram':
+            from .reporting import enrich
+            return enrich(result,args[0])
+        return result

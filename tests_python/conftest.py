@@ -15,6 +15,20 @@ sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
 
+@pytest.fixture(autouse=True)
+def isolated_model_environment(monkeypatch):
+    """Unit tests never inherit a developer's or a deployed server's paid model."""
+    monkeypatch.setenv('EDENTICA_MODE', 'local')
+    monkeypatch.setenv('LLM_PROVIDER', 'cloudru')
+    for prefix in ('LLM', 'OPENAI', 'CLOUDRU'):
+        for suffix in ('BASE_URL', 'API_KEY', 'MODEL'):
+            monkeypatch.setenv(f'{prefix}_{suffix}', '')
+    monkeypatch.setenv('BRAVE_SEARCH_API_KEY', '')
+    async def research(query,references):
+        return {'searchAvailable':False,'evidence':[{'title':'Test-only documentation evidence','url':'https://docs.python.org/3/tutorial/','excerpt':'Изолированные данные тестового транспорта','status':'fetched'}]}
+    monkeypatch.setattr('backend.research.research',research)
+
+
 @pytest.fixture(scope="session")
 def postgres_url():
     settings = conninfo_to_dict(os.environ.get("TEST_DATABASE_URL") or os.environ["DATABASE_URL"])
@@ -39,4 +53,6 @@ def client(postgres_url):
     from backend.app import create_app
     from fastapi.testclient import TestClient
     with TestClient(create_app(postgres_url), base_url="http://localhost") as test_client:
+        # Prepared fixtures are test-only; the production demo action stays disabled.
+        test_client.app.state.programs.allow_unconfigured = True
         yield test_client

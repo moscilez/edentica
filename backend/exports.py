@@ -15,12 +15,6 @@ def pptx_available():
     return True
 
 
-def artifact_pptx_available():
-    candidates = [Path(os.getenv("ARTIFACT_NODE_MODULES") or ROOT / "node_modules"),
-                  Path.home() / ".cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules"]
-    return any((p / "@oai/artifact-tool/package.json").exists() for p in candidates)
-
-
 async def subprocess_bytes(command, payload, timeout=60, maximum=20000000):
     process = await asyncio.create_subprocess_exec(*command, stdin=asyncio.subprocess.PIPE,
                                                   stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -68,24 +62,54 @@ def gift(program):
     return "\n\n".join(questions).encode("utf-8")
 
 
-async def export_program(program, format, module_id=None):
+def slide_targets(program):
+    """Export mappings are derived from the approved calendar, never guessed by LLM."""
+    from .planning import concept_present
+    req=program.get('requirements',{});s=program['skeleton'];targets=[]
+    for i,row in enumerate(s.get('calendar',{}).get('sessions',[])[:req.get('slidesForSessions') or 0],1):
+        ids=[x for x in row['topicIds'] if x!='final']
+        if ids:targets.append({'file':f'slides/session-{i}.pptx','topicIds':ids,'sessionId':row.get('id',f'S{i}'),'scope':'Материалы тем занятия; распределение внутри занятия указано в календаре'})
+    for i,m in enumerate(s.get('modules',[]),1):
+        if any(concept_present(name,m['title']+' '+' '.join(t['title'] for t in m['topics'])) for name in req.get('slidesForTopics',[])):
+            targets.append({'file':f'slides/requested-module-{i}.pptx','moduleId':m['id'],'topicIds':[t['id'] for t in m['topics']]})
+    return targets
+
+
+async def export_program(program, format, module_id=None, topic_ids=None):
     payload = json.dumps(program, ensure_ascii=False).encode()
-    if format == "json":
+    if format=='report':
+        from .reporting import report_html
+        content,mime=report_html(program),'text/html; charset=utf-8'
+    elif format=='zip':
+        from io import BytesIO
+        from zipfile import ZipFile,ZIP_DEFLATED
+        from .docx_export import build
+        from .slides import program_pptx
+        from .reporting import report_html
+        def archive():
+            buffer=BytesIO()
+            with ZipFile(buffer,'w',ZIP_DEFLATED) as z:
+                z.writestr('program.docx',build(program));z.writestr('program.json',payload)
+                z.writestr('tests.gift',gift(program));z.writestr('validation-report.html',report_html(program))
+                for index,mid in enumerate(program['materials'],1):z.writestr(f'slides/module-{index}.pptx',program_pptx(program,mid))
+                targets=slide_targets(program)
+                for target in targets:z.writestr(target['file'],program_pptx(program,target.get('moduleId'),target['topicIds']))
+                z.writestr('slides/manifest.json',json.dumps(targets,ensure_ascii=False,indent=2))
+            return buffer.getvalue()
+        content,mime=await asyncio.to_thread(archive),'application/zip'
+    elif format == "json":
         content, mime = payload, "application/json"
     elif format == "gift":
         content, mime = gift(program), "text/plain; charset=utf-8"
     elif format == "docx":
-        content = await subprocess_bytes([sys.executable, str(ROOT / "scripts/export-program.py")], payload)
+        from .docx_export import build
+        content = await asyncio.to_thread(build,program)
         mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     elif format == "pptx":
-        if artifact_pptx_available():
-            content = await subprocess_bytes([os.getenv("NODE_PATH") or "node", str(ROOT / "scripts/export-slides.mjs")],
-                                             json.dumps({"program": program, "moduleId": module_id}).encode(), timeout=120)
-        else:
-            from .slides import program_pptx
-            content = await asyncio.to_thread(program_pptx, program, module_id)
+        from .slides import program_pptx
+        content = await asyncio.to_thread(program_pptx,program,module_id,topic_ids)
         mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
     else:
         raise HTTPException(422, "Неизвестный формат")
     return Response(content, media_type=mime,
-                    headers={"Content-Disposition": f'attachment; filename="edentica-draft-{program["id"]}.{format}"'})
+                    headers={"Content-Disposition": f'attachment; filename="edentica-draft-{program["id"]}.{"html" if format=="report" else format}"'})
