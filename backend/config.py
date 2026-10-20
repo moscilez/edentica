@@ -14,13 +14,14 @@ class Settings:
     base_url:str
     api_key:str
     model:str
+    structured_output:bool=True
 
     @classmethod
     def load(cls):
         base=os.getenv('LLM_BASE_URL') or os.getenv('OPENAI_BASE_URL') or 'https://foundation-models.api.cloud.ru/v1'
         key=os.getenv('LLM_API_KEY') or os.getenv('OPENAI_API_KEY') or os.getenv('CLOUDRU_API_KEY','')
         model=os.getenv('LLM_MODEL') or os.getenv('OPENAI_MODEL') or os.getenv('CLOUDRU_MODEL','')
-        return cls(os.getenv('EDENTICA_MODE','hackathon'),os.getenv('LLM_PROVIDER','cloudru'),base.rstrip('/'),key,model)
+        return cls(os.getenv('EDENTICA_MODE','hackathon'),os.getenv('LLM_PROVIDER','cloudru'),base.rstrip('/'),key,model,os.getenv('LLM_STRUCTURED_OUTPUT','1')!='0')
 
     def validate_endpoint(self,base,model=''):
         if self.mode!='hackathon':return
@@ -33,6 +34,7 @@ class Settings:
             raise ValueError('Модель не входит в разрешённые семейства GigaChat, Qwen и DeepSeek. Администратор должен проверить модель перед добавлением в список.')
 
     def validate(self):
+        if os.getenv('LLM_STRUCTURED_OUTPUT','1') not in ('0','1'):raise ValueError('LLM_STRUCTURED_OUTPUT: 0 или 1')
         if self.mode not in ('local','hackathon'):raise ValueError('EDENTICA_MODE: local или hackathon')
         if self.provider not in ('cloudru','codex'):raise ValueError('LLM_PROVIDER: cloudru или codex')
         if self.provider=='codex' and self.mode!='local':raise ValueError('Codex разрешён только в локальном режиме разработки')

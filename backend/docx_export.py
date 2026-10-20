@@ -1,5 +1,5 @@
 """Build a draft using retained ACR reference section geometry and styles."""
-import io, json, sys
+import io
 from pathlib import Path
 from docx import Document
 from docx.shared import Pt, Cm
@@ -10,6 +10,8 @@ from docx.oxml.ns import qn
 ROOT = Path(__file__).resolve().parent.parent
 
 def build(p):
+    from .canonical import canonicalize_sections
+    p={**p,'sections':canonicalize_sections(p.get('sections',{}),p['skeleton'])}
     s = p['skeleton']
     template = ROOT / 'templates' / ('acr-dpp.docx' if s['type'] == 'dpp' else 'acr-general.docx')
     doc = Document(template)
@@ -76,29 +78,36 @@ def build(p):
     headings = p.get('templateSections', list(p['sections']))
     for title in headings:
         heading(title)
-        para(p['sections'].get(title, 'Требует заполнения методистом'))
-        if title in ['Цель реализации программы', 'Цель и задачи программы']: para(s['goal'])
-        if title in ['Требования к слушателям', 'Категории обучающихся']: para(s['audience']+'. Входной уровень: '+s['entryLevel'])
+        if title!='Планируемые результаты обучения':para(p['sections'].get(title, 'Требует заполнения методистом'))
         if title == 'Планируемые результаты обучения':
             for c in s['competencies']:
                 heading(c['id']+' '+c['title'], 2)
                 para('Знать: '+c['knowledge']);para('Уметь: '+c['abilities']);para('Владеть: '+c['skills'])
-                if c.get('standard'): para('Профстандарт и трудовая функция требуют проверки: '+json.dumps(c['standard'],ensure_ascii=False))
+                if c.get('standard'):
+                    standard=c['standard']
+                    para('Профстандарт: '+standard.get('title','')+'; код '+standard.get('code','')+'. Трудовая функция '+standard.get('functionCode','')+' — '+standard.get('functionTitle','требует проверки')+'.')
+                    if standard.get('mappingReason'):para('Связь с результатом обучения: '+standard['mappingReason'])
+                    para('Источник: '+standard.get('url','не подтверждён')+'. Актуальность и применимость подтверждает эксперт.')
         if title in ['Учебный план', 'Учебно-тематический план']:
             rows=[]
             for m in s['modules']:
                 if title=='Учебный план':
                     hs={k:sum(t['hours'][k] for t in m['topics']) for k in ['lecture','practice','lab','self']}
-                    rows.append([m['title'],m['totalHours'],*hs.values()])
+                    rows.append([m['title'],m['totalHours'],*hs.values(),0])
                 else:
-                    rows.extend([[t['id']+' '+t['title'],t['totalHours'],*[t['hours'][k] for k in ['lecture','practice','lab','self']]] for t in m['topics']])
-            rows.append(['Итоговая аттестация',s['finalHours'],'—','—','—','—'])
+                    rows.extend([[t['id']+' '+t['title'],t['totalHours'],*[t['hours'][k] for k in ['lecture','practice','lab','self']],0] for t in m['topics']])
+            rows.append(['Итоговая аттестация',s['finalHours'],0,0,0,0,s['finalHours']])
             totals=[sum(t['hours'][k] for m in s['modules'] for t in m['topics']) for k in ['lecture','practice','lab','self']]
-            rows.append(['Итого',s['totalHours'],*totals])
-            table(['Модуль или тема','Всего','Лекции','Практики','Лаб.','СРС'],rows)
+            rows.append(['Итого',s['totalHours'],*totals,s['finalHours']])
+            table(['Модуль или тема','Всего','Лекции','Практики','Лаб.','СРС','Аттест.'],rows)
+            if title=='Учебно-тематический план' and any(t.get('delivery',{}).get('remote') for m in s['modules'] for t in m['topics']):
+                para('Предложенное распределение контактных часов по форме участия. Соотношение утверждает методист. Часы самостоятельной работы и итоговой аттестации показаны отдельно в основном плане.')
+                deliveries=[[t['id']+' '+t['title'],t.get('delivery',{}).get('inPerson',0)+t.get('delivery',{}).get('remote',0),t.get('delivery',{}).get('inPerson',0),t.get('delivery',{}).get('remote',0)] for m in s['modules'] for t in m['topics']]
+                deliveries.append(['Итого',*[sum(row[i] for row in deliveries) for i in range(1,4)]])
+                table(['Тема','Контактные часы','Очно','Дистанционно'],deliveries)
         if title=='Календарный учебный график':
-            para('Срок реализации: '+str(s['calendar']['weeks'])+' недель')
-            table(['Занятие','Неделя','Часы','Темы'],[[i+1,x['week'],x['hours'],', '.join(x['topicIds']).replace('final','Итоговая аттестация')] for i,x in enumerate(s['calendar']['sessions'])])
+            table(['Занятие','Неделя / день','Часы','Темы и часы'],[[i+1,str(x['week'])+' / '+str(x.get('day','—')),x['hours'],
+                '; '.join(('Итоговая аттестация' if a['topicId']=='final' else a['topicId'])+' — '+str(a['hours'])+' ч.' for a in x.get('allocations',[{'topicId':x['topicIds'][0],'hours':x['hours']}]))] for i,x in enumerate(s['calendar']['sessions'])])
         if title in ['Рабочая программа учебных дисциплин','Содержание программы']:
             for m in s['modules']:
                 heading(m['title'],2)
@@ -116,11 +125,16 @@ def build(p):
         for a in m['seminars']:
             heading(a['title'],3);para(a['task']);para('Сдаваемый результат: '+a['deliverable'])
             table(['Критерий','Баллы'],[[c['title'],c['points']] for c in a['criteria']])
+        for a in m.get('interviews',[]):
+            heading('Собеседование: '+a['topicId'],3);para(a['text']);para('Ожидаемый ответ: '+a['expectedAnswer'])
+            para('Результаты: '+', '.join(a['competencyIds']))
+            table(['Критерий','Баллы'],[[c['title'],c['points']] for c in a['criteria']])
     f=p.get('finalAssessment')
     if f:
         heading('Итоговая аттестация',2);para(f['title']);para(f['task']);para(f.get('deliverable',''))
+        for item in f.get('items',[]):para(item['title']+': '+item['requirements'])
         table(['Критерий','Баллы'],[[c['title'],c['points']] for c in f['criteria']])
-    heading('Приложение 2 Планы лекций')
+    heading('Приложение 2 Руководства самостоятельного изучения и слайды' if s.get('selfStudyOnly') else 'Приложение 2 Планы лекций')
     for m in p['materials'].values():
         for lecture in m['lectures']:
             heading(lecture['title'],2);para(lecture['plan']);para(lecture.get('content',''))

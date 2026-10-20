@@ -151,7 +151,7 @@ def create_app(database_url=None, complete=None):
     async def health():
         await db("one", "SELECT 1")
         return {"service": "edentica", "status": "ready", "backend": "python", "database": "postgresql",
-                'workflowVersion':2,'modelConfigured':bool(app.state.programs.provider_status()['configured'])}
+                'workflowVersion':3,'modelConfigured':bool(app.state.programs.provider_status()['configured'])}
 
     @app.get("/api/me")
     async def me(request: Request):

@@ -53,6 +53,11 @@ def inspect_skeleton(s,requirements=None):
             standard=c.get('standard') or {}
             if s.get('type')=='general' and standard:bad('standard',path,'Общеразвивающая программа не требует трудовых функций')
             if s.get('type')=='dpp' and not (standard.get('code') and standard.get('functionCode')):warnings.append(issue('standard_missing',path,'Профстандарт и трудовая функция требуют подтверждения'))
+            if standard:
+                from .standards import CATALOG,standard_issue
+                if not re.fullmatch(r'\d{2}\.\d{3}',str(standard.get('code',''))):bad('standard_invalid',path,'Некорректный код профстандарта')
+                elif any(x['code']==standard.get('code') for x in CATALOG) and standard_issue(standard):bad('standard_invalid',path,standard_issue(standard))
+                elif standard_issue(standard):warnings.append(issue('standard_review',path,standard_issue(standard)))
         module_ids=set();topic_ids=set();covered=set();module_hours=0;practical=0;topic_hours={}
         for mi,m in enumerate(modules):
             path=f'modules.{mi}'
@@ -90,19 +95,26 @@ def inspect_skeleton(s,requirements=None):
         for cid in ids-covered:bad('coverage',cid,'Компетенция не раскрыта ни в одной теме')
         if practical<requirements.get('minPracticeHours',0):bad('practice','modules','Недостаточно практических часов')
         calendar=s.get('calendar') or {};sessions=calendar.get('sessions')
-        if not integer(calendar.get('weeks')) or calendar['weeks']<1 or not isinstance(sessions,list) or not 1<=len(sessions)<=1000:bad('calendar','calendar','Укажите недели и занятия календаря')
+        if not integer(calendar.get('weeks')) or calendar['weeks']<1 or not isinstance(sessions,list) or not 1<=len(sessions)<=10000:bad('calendar','calendar','Укажите недели и занятия календаря')
         else:
             allocated={}
             for row in sessions:
                 refs=row.get('topicIds')
                 if not integer(row.get('hours')) or row['hours']<1 or not integer(row.get('week')) or not 1<=row['week']<=calendar['weeks'] or not isinstance(refs,list) or any(x not in topic_ids|{'final'} for x in refs):bad('calendar_reference','calendar','Проверьте часы, недели и ссылки календаря')
-                if not isinstance(refs,list) or len(refs)!=1:bad('calendar_allocation','calendar','Одна строка календаря должна относиться к одной теме')
-                else:allocated[refs[0]]=allocated.get(refs[0],0)+row.get('hours',0)
+                parts=row.get('allocations')
+                if parts is None and isinstance(refs,list) and len(refs)==1:parts=[{'topicId':refs[0],'hours':row.get('hours',0)}]
+                if not isinstance(parts,list) or not parts or any(not isinstance(x,dict) or x.get('topicId') not in topic_ids|{'final'} or not integer(x.get('hours')) or x['hours']<=0 for x in parts):
+                    bad('calendar_allocation','calendar','Нужна разбивка часов занятия по темам')
+                else:
+                    if sum(x['hours'] for x in parts)!=row.get('hours') or [x['topicId'] for x in parts]!=refs:bad('calendar_allocation','calendar','Распределение тем не совпадает с часами занятия')
+                    for part in parts:allocated[part['topicId']]=allocated.get(part['topicId'],0)+part['hours']
             if sum(row.get('hours',0) for row in sessions)!=s.get('totalHours'):bad('calendar_sum','calendar','Сумма календаря не равна объёму программы')
             for tid,hours in topic_hours.items():
                 if allocated.get(tid)!=hours:bad('calendar_topic',tid,'Календарные часы не совпадают с тематическим планом')
             if allocated.get('final')!=final:bad('calendar_final','calendar','Календарные часы аттестации не совпадают')
             if requirements.get('weeks') and calendar['weeks']!=requirements['weeks']:bad('calendar_weeks','calendar','Число недель не совпадает с запросом')
+        from .acceptance import inspect_constraints
+        errors+=inspect_constraints(s,requirements)
         return {'errors':errors,'warnings':warnings,'totalHours':module_hours+(final or 0),'practicalHours':practical}
     except (TypeError,KeyError,AttributeError,ValueError):
         return {'errors':errors+[issue('schema','skeleton','Неверная структура каркаса: проверьте компетенции, модули, темы и календарь')],'warnings':warnings}
@@ -125,10 +137,11 @@ def inspect_module(content,module,skeleton,allow_empty_questions=False):
                 if not text(item.get('id'),80) or item['id'] in ids:bad('Повтор или отсутствие кода материала')
                 ids.add(item.get('id'))
                 if item.get('topicId') not in topic_ids:bad('Материал ссылается на тему вне модуля')
-                if not isinstance(item.get('competencyIds'),list) or not item['competencyIds'] or any(c not in competency_ids for c in item['competencyIds']):bad('Неверная привязка к результату обучения')
+                linked=next((t for t in module['topics'] if t['id']==item.get('topicId')),None)
+                if not isinstance(item.get('competencyIds'),list) or not item['competencyIds'] or any(c not in (linked or {}).get('competencyIds',[]) for c in item['competencyIds']):bad('Неверная привязка к результатам именно этой темы')
                 if kind=='questions':
                     options=item.get('options')
-                    if not text(item.get('text'),4000) or not isinstance(options,list) or not 2<=len(options)<=6 or any(not text(x,2000) for x in options) or not integer(item.get('answer')) or not 0<=item['answer']<len(options) or not text(item.get('explanation'),4000):bad('Тест требует вариантов ответа, корректного ключа и объяснения')
+                    if not text(item.get('text'),4000) or not isinstance(options,list) or not 2<=len(options)<=10 or any(not text(x,2000) for x in options) or not integer(item.get('answer')) or not 0<=item['answer']<len(options) or not text(item.get('explanation'),4000):bad('Тест требует вариантов ответа, корректного ключа и объяснения')
                 if kind=='seminars':
                     if any(not text(item.get(k),limit) for k,limit in [('title',300),('task',20000),('deliverable',6000)]) or not valid_criteria(item.get('criteria')):bad('Задание требует результата и критериев суммарно на 100 баллов')
                 if kind=='lectures':
@@ -137,6 +150,9 @@ def inspect_module(content,module,skeleton,allow_empty_questions=False):
                     if not text(item.get('content'),60000) or len(item.get('content',''))<200:bad('Нужен полный учебный текст лекции, а не только план (не менее 200 символов)')
         for t in module['topics']:
             if not any(x.get('topicId')==t['id'] for x in content.get('lectures',[])):bad('Нет учебного материала темы '+t['id'])
+        for item in content.get('interviews',[]):
+            linked=next((t for t in module['topics'] if t['id']==item.get('topicId')),None)
+            if not linked or not item.get('competencyIds') or set(item['competencyIds'])-set(linked['competencyIds']) or not text(item.get('text'),4000) or not text(item.get('expectedAnswer'),6000) or not valid_criteria(item.get('criteria')):bad('Собеседование требует темы, результата, ожидаемого ответа и критериев на 100 баллов')
     except (TypeError,KeyError,AttributeError,ValueError):bad('Некорректная структура материалов модуля')
     return errors
 
@@ -161,10 +177,11 @@ def inspect_program(p):
         for m in s.get('modules',[]):
             content=p.get('materials',{}).get(m['id'])
             if not content:r['errors'].append(issue('missing_module',m['id'],'Комплект модуля ещё не подготовлен'));continue
-            r['errors']+=inspect_module(content,m,s)
+            r['errors']+=inspect_module(content,m,s,allow_empty_questions=(p.get('requirements') or {}).get('currentControl')=='interview' or (p.get('requirements') or {}).get('testQuestionCount') is not None)
             for c in coverage:
                 for kind,key in [('questions','questions'),('seminars','assignments')]:
                     c[key]+=[m['id']+':'+q['id'] for q in content.get(kind,[]) if c['id'] in q.get('competencyIds',[])]
+                c['questions']+=[m['id']+':'+q['id'] for q in content.get('interviews',[]) if c['id'] in q.get('competencyIds',[])]
         requested=(p.get('requirements') or {}).get('testQuestionCount')
         if requested and sum(len(m.get('questions',[])) for m in p.get('materials',{}).values())!=requested:r['errors'].append(issue('question_count','materials','Количество тестовых вопросов не совпадает с запросом'))
         for c in coverage:
@@ -175,6 +192,7 @@ def inspect_program(p):
         if not text(f.get('task'),20000) or not valid_criteria(f.get('criteria')):r['errors'].append(issue('final_assessment','finalAssessment','Нужны итоговое задание и критерии на 100 баллов'))
     except (TypeError,KeyError,AttributeError,ValueError):r['errors'].append(issue('schema','materials','Некорректная структура комплекта'))
     sources=[{**x,'status':(x.get('verification') or {}).get('status','unverified')} for x in p.get('sources',[]) if isinstance(x,dict)]
+    if p.get('referenceStatus',{}).get('mentionedButMissing'):r['warnings'].append(issue('reference_missing','referenceIds','Референс упомянут, но не прикреплён: использован стандартный шаблон, а не структура невидимого файла'))
     for source in sources:
         if source['status']=='rejected':r['errors'].append(issue('source_rejected',source.get('id',''),'Отклонённый источник нужно заменить или удалить: '+source.get('title','')))
         if source['status']!='confirmed':r['warnings'].append(issue('source_unverified',source.get('id',''),'Источник не подтверждён: '+source.get('title','')))
@@ -183,5 +201,19 @@ def inspect_program(p):
     if not sources:r['warnings'].append(issue('sources_missing','sources','Список литературы не заполнен'))
     for c in s.get('competencies',[]):
         if s.get('type')=='dpp' and not c.get('standard'):r['warnings'].append(issue('standard_missing',c.get('id',''),'Профстандарт и код трудовой функции не подтверждены'))
-    r.update(coverage=coverage,sources=sources,checkedAt=datetime.now(timezone.utc).isoformat(),passed=not r['errors'],draft=True)
+    structural_passed=not r['errors'];acceptance=[]
+    if s.get('constraintVersion',0)>=3:
+        from .acceptance import inspect_acceptance
+        from .standards import standard_issue
+        acceptance=inspect_acceptance(p)
+        for row in acceptance:
+            if row['status']=='failed':r['errors'].append(issue('requirement',row['id'],row['title']+': '+str(row['evidence'])))
+        if s.get('type')=='dpp':
+            for c in s.get('competencies',[]):
+                problem=standard_issue(c.get('standard'))
+                if problem:r['warnings'].append(issue('standard_review',c['id'],problem))
+        from .regulations import section_policy_issues
+        for problem in section_policy_issues({'sections':p.get('sections',{})},s.get('type')):r['errors'].append(issue('regulation','sections',problem))
+    r.update(coverage=coverage,sources=sources,acceptance=acceptance,structuralPassed=structural_passed,
+             checkedAt=datetime.now(timezone.utc).isoformat(),passed=not r['errors'],draft=True)
     return r

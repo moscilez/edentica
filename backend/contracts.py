@@ -17,6 +17,18 @@ class Requirements(BaseModel):
     minPracticeHours:StrictInt=Field(default=0,ge=0)
     testQuestionCount:StrictInt|None=Field(default=None,ge=1,le=1000)
     selfStudyOnly:bool=False
+    sessionHours:StrictInt|None=Field(default=None,ge=1,le=24)
+    sessionsPerWeek:StrictInt|None=Field(default=None,ge=1,le=7)
+    maxHoursPerDay:StrictInt|None=Field(default=None,ge=1,le=24)
+    daysPerWeek:StrictInt=Field(default=5,ge=1,le=7)
+    durationMonths:StrictInt|None=Field(default=None,ge=1,le=24)
+    approximateDuration:bool=False
+    portfolioItems:StrictInt|None=Field(default=None,ge=1,le=100)
+    currentControl:Literal['test','interview','mixed']='test'
+    requiredTopics:list[str]=Field(default_factory=list,max_length=40)
+    slidesForSessions:StrictInt|None=Field(default=None,ge=1,le=100)
+    slidesForTopics:list[str]=Field(default_factory=list,max_length=40)
+    russiaOnlyServices:bool=False
 
 
 class Question(BaseModel):
@@ -31,13 +43,21 @@ class Intake(BaseModel):
     skeleton:dict|None=None
 
 
+class StandardLink(BaseModel):
+    code:str
+    title:str=''
+    functionCode:str
+    url:str=''
+    status:Literal['unverified','scope_requires_expert_review']='unverified'
+
+
 class Competency(BaseModel):
     id:str=Field(min_length=1,max_length=80)
     title:str=Field(min_length=1,max_length=300)
     knowledge:str=Field(min_length=1,max_length=3000)
     abilities:str=Field(min_length=1,max_length=3000)
     skills:str=Field(min_length=1,max_length=3000)
-    standard:dict|None=None
+    standard:StandardLink|None=None
 
 
 class OutlineTopic(BaseModel):
@@ -67,8 +87,8 @@ class LinkedMaterial(BaseModel):
 
 class TestQuestion(LinkedMaterial):
     text:str=Field(min_length=1,max_length=4000)
-    options:list[str]=Field(min_length=2,max_length=6)
-    answer:StrictInt=Field(ge=0,le=5)
+    options:list[str]=Field(min_length=2,max_length=10)
+    answer:StrictInt=Field(ge=0,le=9)
     explanation:str=Field(min_length=1,max_length=4000)
 
 
@@ -107,6 +127,26 @@ class LessonMaterial(BaseModel):
     sources:list[dict]=Field(default_factory=list)
 
 
+class Interview(LinkedMaterial):
+    text:str=Field(min_length=1,max_length=4000)
+    expectedAnswer:str=Field(min_length=1,max_length=6000)
+    criteria:list[Criterion]=Field(min_length=2)
+
+
 class LessonAssessment(BaseModel):
     questions:list[TestQuestion]
     seminars:list[Seminar]=Field(min_length=1)
+    interviews:list[Interview]=Field(default_factory=list)
+
+
+class PortfolioItem(BaseModel):
+    title:str=Field(min_length=1,max_length=300)
+    requirements:str=Field(min_length=1,max_length=6000)
+
+
+class FinalAssessment(BaseModel):
+    title:str=Field(min_length=1,max_length=300)
+    task:str=Field(min_length=1,max_length=20000)
+    deliverable:str=Field(min_length=1,max_length=6000)
+    criteria:list[Criterion]=Field(min_length=2,max_length=30)
+    items:list[PortfolioItem]=Field(default_factory=list,max_length=100)

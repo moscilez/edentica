@@ -22,7 +22,8 @@ def public_url(value):
 
 async def public_request(method, url, *, headers=None, payload=None, limit=2000000, timeout=30, allow_private=False):
     parsed, host = public_url(url)
-    addresses = await asyncio.wait_for(asyncio.to_thread(socket.getaddrinfo, host, 443, type=socket.SOCK_STREAM), 5)
+    try:addresses = await asyncio.wait_for(asyncio.to_thread(socket.getaddrinfo, host, 443, type=socket.SOCK_STREAM), 5)
+    except socket.gaierror:raise httpx.ConnectError('DNS внешнего сервиса недоступен') from None
     ips = list(dict.fromkeys(a[4][0] for a in addresses))
     def permitted(value):
         address = ipaddress.ip_address(value)
@@ -30,17 +31,23 @@ async def public_request(method, url, *, headers=None, payload=None, limit=20000
             (address.is_loopback or address.is_link_local or address.is_reserved or address.is_unspecified or address.is_multicast))
     if not ips or any(not permitted(ip) for ip in ips):
         raise ValueError("Запросы к локальным и служебным сетям запрещены")
-    ip = ips[0]
-    netloc = "[" + ip + "]" if ":" in ip else ip
-    pinned = urlunsplit(("https", netloc, parsed.path or "/", parsed.query, ""))
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False) as client:
-        async with client.stream(method, pinned, headers={**(headers or {}), "Host": host,"Accept-Encoding":"identity"}, json=payload,
-                                 extensions={"sni_hostname": host}) as response:
-            if response.headers.get("content-encoding", "identity").lower() != "identity":
-                raise ValueError("Сжатые ответы внешнего сервиса не поддерживаются")
-            data = bytearray()
-            async for chunk in response.aiter_raw(chunk_size=65536):
-                data.extend(chunk)
-                if len(data) > limit:
-                    raise ValueError("Ответ внешнего сервиса слишком большой")
-            return response.status_code, dict(response.headers), bytes(data)
+    # Prefer IPv4 on VPS installations without IPv6 routing. Fail over only for a
+    # connection failure BEFORE a response; never replay a paid POST after a read
+    # timeout or partial response. All addresses were checked before any request.
+    ips.sort(key=lambda value:(':' in value))
+    async with asyncio.timeout(timeout):
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, trust_env=False) as client:
+            for index,ip in enumerate(ips[:3]):
+                netloc = "[" + ip + "]" if ":" in ip else ip
+                pinned = urlunsplit(("https", netloc, parsed.path or "/", parsed.query, ""))
+                try:
+                    async with client.stream(method,pinned,headers={**(headers or {}),"Host":host,"Accept-Encoding":"identity"},json=payload,
+                                             extensions={"sni_hostname":host}) as response:
+                        if response.headers.get("content-encoding","identity").lower()!='identity':raise ValueError('Сжатые ответы внешнего сервиса не поддерживаются')
+                        data=bytearray()
+                        async for chunk in response.aiter_raw(chunk_size=65536):
+                            data.extend(chunk)
+                            if len(data)>limit:raise ValueError('Ответ внешнего сервиса слишком большой')
+                        return response.status_code,dict(response.headers),bytes(data)
+                except httpx.ConnectError:
+                    if index==len(ips[:3])-1:raise

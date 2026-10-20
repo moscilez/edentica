@@ -121,10 +121,12 @@ def test_materials_ownership_demo_exports_and_revision(client):
     assert agent(client, "create", request="Курс", referenceIds=[ref]).status_code == 422
 
 
-def test_real_orchestration_with_mock_provider(postgres_url):
+def test_real_orchestration_with_mock_provider(postgres_url,monkeypatch):
     rules = Rules()
     fixture = asyncio.run(rules.call("demonstration"))
     sections = asyncio.run(rules.call("config"))["templateSections"]
+    async def probe(source):return {'access':'reachable','status':'unverified'}
+    monkeypatch.setattr('backend.programs.probe_source',probe)
     calls = []
     async def complete(skill, payload):
         calls.append(skill)
@@ -133,17 +135,25 @@ def test_real_orchestration_with_mock_provider(postgres_url):
                      "questions": [] if payload["answers"].get("level") else [{"field": "level", "question": "Какой входной уровень?"}], "notes": []}
         elif "Навык 2" in skill:
             value = copy.deepcopy(fixture["skeleton"])
-        elif "Навык 3" in skill or "Навык 5" in skill:
-            value = copy.deepcopy(fixture["materials"][payload["module"]["id"]])
-            if payload.get("instruction"):
-                value["summary"] = "Точечно обновлённое содержание"
+            value['modules'][0]['title']='Основы Python'
+        elif "Навык 3" in skill:
+            topic=payload['module']['topics'][0]
+            original=next(iter(fixture['materials'].values()))
+            if 'JSON-объект лекции' in skill:
+                value=copy.deepcopy(original['lectures'][0])
+                value.update(topicId=topic['id'],competencyIds=topic['competencyIds'])
+                if payload.get('instruction'):value['title']='Точечно обновлённое содержание'
+            else:
+                value={}
+                for kind in ('questions','seminars'):
+                    item=copy.deepcopy(original[kind][0]);item.update(topicId=topic['id'],competencyIds=topic['competencyIds']);value[kind]=[item]
         else:
             value = {"sections": {x: "Раздел учебной программы для школьников" for x in sections["general"]},
                      "finalAssessment": fixture["finalAssessment"], "sources": fixture["sources"]}
         return {"value": value, "usage": {"inputTokens": 100, "outputTokens": 50}, "model": "mock-only"}
     with TestClient(create_app(postgres_url, complete), base_url="http://localhost") as client:
         register(client)
-        p = agent(client, "create", request="Курс Python на 16 часов").json()
+        p = agent(client, "create", request="Общеразвивающий курс Python на 16 часов").json()
         id = p["id"]
         assert agent(client, "generate", id=id).status_code == 422
         agent(client, "analyze", id=id)
@@ -160,12 +170,12 @@ def test_real_orchestration_with_mock_provider(postgres_url):
         assert p["job"]["state"] == "completed", p["job"]
         assert p["report"]["passed"], p["report"]
         assert p["usage"]["inputTokens"] == len(calls) * 100
-        untouched = copy.deepcopy(p["materials"]["М2"])
-        agent(client, "revise_module", id=id, moduleId="М1", instruction="Обновите пояснение")
+        untouched = copy.deepcopy(p["materials"]["M2"])
+        agent(client, "revise_module", id=id, moduleId="M1", instruction="Обновите пояснение")
         p = wait(client, id)
-        assert p["materials"]["М2"] == untouched
-        assert p["materials"]["М1"]["summary"] == "Точечно обновлённое содержание"
-        assert p["history"][-1]["materials"]["М1"]["summary"] != p["materials"]["М1"]["summary"]
+        assert p["materials"]["M2"] == untouched
+        assert p["materials"]["M1"]["summary"].strip() == "Точечно обновлённое содержание"
+        assert p["history"][-1]["materials"]["M1"]["summary"] != p["materials"]["M1"]["summary"]
         assert agent(client, "export", id=id, format="gift").status_code == 200
         source = p["sources"][0]
         assert source["verification"]["status"] == "unverified"

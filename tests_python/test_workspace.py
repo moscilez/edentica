@@ -194,8 +194,8 @@ def test_complete_brief_builds_outline_in_one_call_without_approving(postgres_ur
         return {'value':{'requirements':{k:s[k] for k in ('type','totalHours','audience','entryLevel','format','assessment')},'questions':[],'notes':[],'skeleton':s},'usage':{'inputTokens':100,'outputTokens':500},'model':'test-model'}
     with TestClient(create_app(postgres_url,complete),base_url='http://localhost') as client:
         reg(client,'methodist')
-        p=a(client,'create',request='Полный запрос').json()
-        second=a(client,'create',request='Полный запрос').json()
+        p=a(client,'create',request='Общеразвивающая программа на 16 часов').json()
+        second=a(client,'create',request='Общеразвивающая программа на 16 часов').json()
         a(client,'analyze',id=p['id'])
         a(client,'analyze',id=second['id'])
         deadline=time.monotonic()+15
@@ -252,7 +252,7 @@ def test_malformed_intake_is_repaired_not_cached(postgres_url):
         return {'value':value,'usage':{'inputTokens':10,'outputTokens':20},'model':'test-model'}
     with TestClient(create_app(postgres_url,complete),base_url='http://localhost') as client:
         reg(client,'methodist')
-        p=a(client,'create',request='Проверка восстановления схемы '+uuid4().hex).json()
+        p=a(client,'create',request='Общеразвивающая программа на 16 часов. Проверка восстановления схемы '+uuid4().hex).json()
         a(client,'analyze',id=p['id'])
         deadline=time.monotonic()+15
         while time.monotonic()<deadline:
@@ -273,7 +273,7 @@ def test_complete_brief_does_not_ask_to_repeat_extracted_audience(postgres_url):
         return {'value':{'requirements':{k:s[k] for k in ('type','totalHours','audience','entryLevel','format','assessment')},'questions':[{'field':'аудитория','question':'Для школьников какого возраста?'}],'notes':[],'skeleton':s},'usage':{},'model':'test-model'}
     with TestClient(create_app(postgres_url,complete),base_url='http://localhost') as client:
         reg(client,'methodist')
-        p=a(client,'create',request='Полный запрос со всеми обязательными полями').json()
+        p=a(client,'create',request='Общеразвивающая программа на 16 часов со всеми обязательными полями').json()
         a(client,'analyze',id=p['id'])
         deadline=time.monotonic()+15
         while time.monotonic()<deadline:
@@ -295,7 +295,7 @@ def test_truncated_combined_outline_falls_back_to_intake(postgres_url):
         return {'value':{'requirements':{k:s[k] for k in ('type','totalHours','audience','entryLevel','format','assessment')},'questions':[],'notes':[]},'usage':{},'model':'test-model'}
     with TestClient(create_app(postgres_url,complete),base_url='http://localhost') as client:
         reg(client,'methodist')
-        p=a(client,'create',request='Проверка запасного пути '+uuid4().hex).json()
+        p=a(client,'create',request='Общеразвивающая программа на 16 часов. Проверка запасного пути '+uuid4().hex).json()
         a(client,'analyze',id=p['id'])
         deadline=time.monotonic()+15
         while time.monotonic()<deadline:
@@ -305,4 +305,4 @@ def test_truncated_combined_outline_falls_back_to_intake(postgres_url):
         assert result['job']['state']=='completed',result['job']
         assert result['state']=='ready_for_skeleton'
         assert len(calls)==2
-        assert 'Навык 2' in calls[0] and 'Навык 2' not in calls[1]
+        assert all('Навык 2' not in skill for skill in calls)  # Intake stays compact on both attempts

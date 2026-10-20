@@ -1,0 +1,584 @@
+{
+  "recordedAt": "2026-10-20T08:44:55.897573+00:00",
+  "unitTests": 109,
+  "scope": "Cases 1 and 2 completed on October 19; cases 3, 4 and 5 completed on October 20. All five saved programs independently revalidated using current code. No resumed generations counted as fresh.",
+  "limitations": [
+    "Automatic structural checks do not replace expert content or legal review.",
+    "Generation times include automatic test-operator clarification answers and provider retries; real human response time is not measured.",
+    "OOXML archives parsed successfully; visual Word/PowerPoint rendering was not performed."
+  ],
+  "cases": [
+    {
+      "case": "1",
+      "generatedAt": "2026-10-19T20:37:40.916221Z",
+      "success": true,
+      "freshGeneration": true,
+      "skeletonSeconds": 15.22,
+      "fullSeconds": 177.75,
+      "clarificationAnswers": {},
+      "totalHours": 16,
+      "calendarHours": 16,
+      "weeks": 4,
+      "modules": 4,
+      "lessons": 10,
+      "currentValidationErrors": 0,
+      "warningsRequiringHumanReview": 6,
+      "acceptanceChecks": [
+        {
+          "id": "constraints",
+          "status": "passed"
+        },
+        {
+          "id": "section:Сроки реализации",
+          "status": "passed"
+        },
+        {
+          "id": "section:Категории обучающихся",
+          "status": "passed"
+        },
+        {
+          "id": "section:Цель и задачи программы",
+          "status": "passed"
+        },
+        {
+          "id": "section:Планируемые результаты обучения",
+          "status": "passed"
+        },
+        {
+          "id": "section:Учебный план",
+          "status": "passed"
+        },
+        {
+          "id": "section:Учебно-тематический план",
+          "status": "passed"
+        },
+        {
+          "id": "section:Календарный учебный график",
+          "status": "passed"
+        },
+        {
+          "id": "slides",
+          "status": "passed"
+        },
+        {
+          "id": "bibliography",
+          "status": "passed"
+        }
+      ],
+      "model": "GigaChat/GigaChat-3-Pro",
+      "inputTokens": 63122,
+      "outputTokens": 13459,
+      "artifacts": {
+        "docx": {
+          "bytes": 33018,
+          "sha256": "b1902c067c074021602ad9b8974b6625942ff44bab9582c757f349aa8306d088"
+        },
+        "pptx": {
+          "bytes": 97881,
+          "sha256": "59627d1cc27d4a52413c5551fc67087d3ce9cc4837ccfe7ffc6e2f4036997296"
+        },
+        "gift": {
+          "bytes": 5797,
+          "sha256": "0a911ec47e7aa15e0e76a96655718b4e9bd857beb806849b7f52f3deee949b54"
+        },
+        "html": {
+          "bytes": 5419,
+          "sha256": "dfcc55f041cacb1a083cb8902547aef187d595008b573601c76e28cf9c3d9ebe"
+        },
+        "zip": {
+          "bytes": 299311,
+          "sha256": "8221454fbbcb189c108ff286f80ef86aef03193190d3ebd5d214cd611307d77f",
+          "requestedSlideDecks": 2
+        }
+      }
+    },
+    {
+      "case": "2",
+      "generatedAt": "2026-10-19T20:42:06.427425Z",
+      "success": true,
+      "freshGeneration": true,
+      "skeletonSeconds": 146.84,
+      "fullSeconds": 265.83,
+      "clarificationAnswers": {
+        "entryLevel": "Без опыта в изучаемой теме; уверенный пользователь компьютера"
+      },
+      "totalHours": 36,
+      "calendarHours": 36,
+      "weeks": 4,
+      "modules": 3,
+      "lessons": 6,
+      "currentValidationErrors": 0,
+      "warningsRequiringHumanReview": 23,
+      "acceptanceChecks": [
+        {
+          "id": "constraints",
+          "status": "passed"
+        },
+        {
+          "id": "section:Объём программы",
+          "status": "passed"
+        },
+        {
+          "id": "section:Форма обучения",
+          "status": "passed"
+        },
+        {
+          "id": "section:Требования к слушателям",
+          "status": "passed"
+        },
+        {
+          "id": "section:Цель реализации программы",
+          "status": "passed"
+        },
+        {
+          "id": "section:Планируемые результаты обучения",
+          "status": "passed"
+        },
+        {
+          "id": "section:Выдаваемый документ",
+          "status": "passed"
+        },
+        {
+          "id": "section:Организация образовательного процесса",
+          "status": "passed"
+        },
+        {
+          "id": "section:Учебный план",
+          "status": "passed"
+        },
+        {
+          "id": "section:Учебно-тематический план",
+          "status": "passed"
+        },
+        {
+          "id": "section:Календарный учебный график",
+          "status": "passed"
+        },
+        {
+          "id": "portfolio",
+          "status": "passed"
+        },
+        {
+          "id": "bibliography",
+          "status": "passed"
+        },
+        {
+          "id": "standard:C1",
+          "status": "pending"
+        },
+        {
+          "id": "standard:C2",
+          "status": "pending"
+        },
+        {
+          "id": "standard:C3",
+          "status": "passed"
+        },
+        {
+          "id": "standard:C4",
+          "status": "pending"
+        },
+        {
+          "id": "standard:C5",
+          "status": "pending"
+        },
+        {
+          "id": "standard:C6",
+          "status": "pending"
+        },
+        {
+          "id": "services",
+          "status": "passed"
+        }
+      ],
+      "model": "GigaChat/GigaChat-3-Pro",
+      "inputTokens": 56297,
+      "outputTokens": 15209,
+      "artifacts": {
+        "docx": {
+          "bytes": 62875,
+          "sha256": "ae8ddd4b916d9bfbde7e41e6e1a3dc1592e7d2b0681ce4774b50cd59ebe5d646"
+        },
+        "pptx": {
+          "bytes": 97968,
+          "sha256": "e2be21e2df73572d428194d34de3a5b9965ebaf393c4f1d0c93d03a79cd76fcf"
+        },
+        "gift": {
+          "bytes": 10648,
+          "sha256": "6afb45ddbba09b1a8bea881b504426a5dfc4215164e770dc2c47a49891ed9873"
+        },
+        "html": {
+          "bytes": 11732,
+          "sha256": "3ff0ab64f495a714bd4087ef6dabf6f407e455dc6b3a4e1db623d7bb9e6c949b"
+        },
+        "zip": {
+          "bytes": 243292,
+          "sha256": "44d8ea4a7e62c2da1ee1375ec75918306fe61b56cec7aaf5ec415583826f44d8",
+          "requestedSlideDecks": 0
+        }
+      }
+    },
+    {
+      "case": "3",
+      "generatedAt": "2026-10-20T08:34:24.258885Z",
+      "success": true,
+      "freshGeneration": true,
+      "skeletonSeconds": 159.97,
+      "fullSeconds": 363.41,
+      "clarificationAnswers": {
+        "entryLevel": "Без опыта в изучаемой теме; уверенный пользователь компьютера"
+      },
+      "totalHours": 72,
+      "calendarHours": 72,
+      "weeks": 4,
+      "modules": 6,
+      "lessons": 13,
+      "currentValidationErrors": 0,
+      "warningsRequiringHumanReview": 23,
+      "acceptanceChecks": [
+        {
+          "id": "constraints",
+          "status": "passed"
+        },
+        {
+          "id": "section:Объём программы",
+          "status": "passed"
+        },
+        {
+          "id": "section:Форма обучения",
+          "status": "passed"
+        },
+        {
+          "id": "section:Требования к слушателям",
+          "status": "passed"
+        },
+        {
+          "id": "section:Цель реализации программы",
+          "status": "passed"
+        },
+        {
+          "id": "section:Планируемые результаты обучения",
+          "status": "passed"
+        },
+        {
+          "id": "section:Выдаваемый документ",
+          "status": "passed"
+        },
+        {
+          "id": "section:Организация образовательного процесса",
+          "status": "passed"
+        },
+        {
+          "id": "section:Учебный план",
+          "status": "passed"
+        },
+        {
+          "id": "section:Учебно-тематический план",
+          "status": "passed"
+        },
+        {
+          "id": "section:Календарный учебный график",
+          "status": "passed"
+        },
+        {
+          "id": "slides",
+          "status": "passed"
+        },
+        {
+          "id": "bibliography",
+          "status": "passed"
+        },
+        {
+          "id": "standard:C1",
+          "status": "pending"
+        },
+        {
+          "id": "standard:C2",
+          "status": "pending"
+        },
+        {
+          "id": "standard:C3",
+          "status": "passed"
+        },
+        {
+          "id": "standard:C4",
+          "status": "pending"
+        },
+        {
+          "id": "standard:C5",
+          "status": "pending"
+        }
+      ],
+      "model": "GigaChat/GigaChat-3-Pro",
+      "inputTokens": 109761,
+      "outputTokens": 28100,
+      "artifacts": {
+        "docx": {
+          "bytes": 75611,
+          "sha256": "3af15d4da570f20b99acb283e2b9ab6a7cda26a00d8fc565ce77dd3376c74f56"
+        },
+        "pptx": {
+          "bytes": 187416,
+          "sha256": "cebc15939c4525e7bd926f73be8acdf6ff645124a8e0be28a6137370e1f5d64b"
+        },
+        "gift": {
+          "bytes": 16734,
+          "sha256": "4815aa7ad55a624c01b09c2cce023264e4939d907fb3f3ce7c4f02c19389d9fb"
+        },
+        "html": {
+          "bytes": 10638,
+          "sha256": "cbd902516389af22c53f90fbb9e072fa1c655ce79cb21c66d2a23c8293c14eb8"
+        },
+        "zip": {
+          "bytes": 626206,
+          "sha256": "370d231265113f629efb3496a4e518d6e3201ee940bb5ade9fed26e87b7f8f89",
+          "requestedSlideDecks": 4
+        }
+      }
+    },
+    {
+      "case": "4",
+      "generatedAt": "2026-10-20T08:44:21.838250Z",
+      "success": true,
+      "freshGeneration": true,
+      "skeletonSeconds": 142.03,
+      "fullSeconds": 363.59,
+      "clarificationAnswers": {
+        "type": "dpp",
+        "audience": "Студенты колледжа направления информационных систем",
+        "format": "Очная в колледже",
+        "assessment": "Практический экзамен на стенде",
+        "totalHours": 72,
+        "entryLevel": "3 курс СПО, изучены компьютерные сети и Linux"
+      },
+      "totalHours": 72,
+      "calendarHours": 72,
+      "weeks": 4,
+      "modules": 5,
+      "lessons": 15,
+      "currentValidationErrors": 0,
+      "warningsRequiringHumanReview": 9,
+      "acceptanceChecks": [
+        {
+          "id": "constraints",
+          "status": "passed"
+        },
+        {
+          "id": "section:Объём программы",
+          "status": "passed"
+        },
+        {
+          "id": "section:Форма обучения",
+          "status": "passed"
+        },
+        {
+          "id": "section:Требования к слушателям",
+          "status": "passed"
+        },
+        {
+          "id": "section:Цель реализации программы",
+          "status": "passed"
+        },
+        {
+          "id": "section:Планируемые результаты обучения",
+          "status": "passed"
+        },
+        {
+          "id": "section:Выдаваемый документ",
+          "status": "passed"
+        },
+        {
+          "id": "section:Организация образовательного процесса",
+          "status": "passed"
+        },
+        {
+          "id": "section:Учебный план",
+          "status": "passed"
+        },
+        {
+          "id": "section:Учебно-тематический план",
+          "status": "passed"
+        },
+        {
+          "id": "section:Календарный учебный график",
+          "status": "passed"
+        },
+        {
+          "id": "bibliography",
+          "status": "passed"
+        },
+        {
+          "id": "standard:C1",
+          "status": "passed"
+        },
+        {
+          "id": "standard:C2",
+          "status": "passed"
+        },
+        {
+          "id": "standard:C3",
+          "status": "passed"
+        },
+        {
+          "id": "standard:C4",
+          "status": "passed"
+        },
+        {
+          "id": "standard:C5",
+          "status": "passed"
+        }
+      ],
+      "model": "GigaChat/GigaChat-3-Pro",
+      "inputTokens": 107068,
+      "outputTokens": 27433,
+      "artifacts": {
+        "docx": {
+          "bytes": 79109,
+          "sha256": "ef27a03dadbed945678eeceb6a2f3e65ffb22bbb384f32ca1d435ebe516230cb"
+        },
+        "pptx": {
+          "bytes": 206612,
+          "sha256": "1e0b938d58b8b25669b10ee9e8072069d2e791e4254786f84dcf83ad0fd4019d"
+        },
+        "gift": {
+          "bytes": 23424,
+          "sha256": "87a4863b7b31b1db8c029c645f70a4a12133f11127c4afa019e7d1683a48790a"
+        },
+        "html": {
+          "bytes": 8425,
+          "sha256": "a962bea15b104fa412086006f1df3db2349e85620e5aa9edbb10bd73af05551a"
+        },
+        "zip": {
+          "bytes": 426145,
+          "sha256": "e5f0df8fda5eb4f6f8cdbf65cff0ce012054b5b49610ebd7cdb11d65529f0df4",
+          "requestedSlideDecks": 0
+        }
+      }
+    },
+    {
+      "case": "5",
+      "generatedAt": "2026-10-20T08:41:33.571644Z",
+      "success": true,
+      "freshGeneration": true,
+      "skeletonSeconds": 17.14,
+      "fullSeconds": 294.05,
+      "clarificationAnswers": {
+        "audience": "Стажёры ИТ-компаний с базовыми знаниями Linux",
+        "entryLevel": "Без опыта в изучаемой теме; уверенный пользователь компьютера",
+        "weeks": 13
+      },
+      "totalHours": 256,
+      "calendarHours": 256,
+      "weeks": 13,
+      "modules": 6,
+      "lessons": 18,
+      "currentValidationErrors": 0,
+      "warningsRequiringHumanReview": 28,
+      "acceptanceChecks": [
+        {
+          "id": "constraints",
+          "status": "passed"
+        },
+        {
+          "id": "section:Объём программы",
+          "status": "passed"
+        },
+        {
+          "id": "section:Форма обучения",
+          "status": "passed"
+        },
+        {
+          "id": "section:Требования к слушателям",
+          "status": "passed"
+        },
+        {
+          "id": "section:Цель реализации программы",
+          "status": "passed"
+        },
+        {
+          "id": "section:Планируемые результаты обучения",
+          "status": "passed"
+        },
+        {
+          "id": "section:Выдаваемый документ",
+          "status": "passed"
+        },
+        {
+          "id": "section:Организация образовательного процесса",
+          "status": "passed"
+        },
+        {
+          "id": "section:Учебный план",
+          "status": "passed"
+        },
+        {
+          "id": "section:Учебно-тематический план",
+          "status": "passed"
+        },
+        {
+          "id": "section:Календарный учебный график",
+          "status": "passed"
+        },
+        {
+          "id": "interviews",
+          "status": "passed"
+        },
+        {
+          "id": "bibliography",
+          "status": "passed"
+        },
+        {
+          "id": "standard:C1",
+          "status": "pending"
+        },
+        {
+          "id": "standard:C2",
+          "status": "pending"
+        },
+        {
+          "id": "standard:C3",
+          "status": "passed"
+        },
+        {
+          "id": "standard:C4",
+          "status": "pending"
+        },
+        {
+          "id": "standard:C5",
+          "status": "pending"
+        },
+        {
+          "id": "standard:C6",
+          "status": "pending"
+        }
+      ],
+      "model": "GigaChat/GigaChat-3-Pro",
+      "inputTokens": 135473,
+      "outputTokens": 30514,
+      "artifacts": {
+        "docx": {
+          "bytes": 84364,
+          "sha256": "bf1c8262379ea96762e1841c379c99a1ddebf894cb86feedc381c30a94b85780"
+        },
+        "pptx": {
+          "bytes": 236205,
+          "sha256": "a467be6dea09234bcde7475f3c0694861cb1dd4e54c09be2ed8c5407ad877a9e"
+        },
+        "gift": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "note": "No multiple-choice test requested; oral interviews are included in DOCX/JSON."
+        },
+        "html": {
+          "bytes": 11880,
+          "sha256": "49b0bacc3cc5507b7edbdb63f7b4bb267eee6b7755d409a544d957608b7289d9"
+        },
+        "zip": {
+          "bytes": 485716,
+          "sha256": "5301507ca4b1ec651b143eff5247e7bd1418f466069a82d837bfe8047c1084ea",
+          "requestedSlideDecks": 0
+        }
+      }
+    }
+  ]
+}

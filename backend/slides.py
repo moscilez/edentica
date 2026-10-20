@@ -7,12 +7,12 @@ from pptx.dml.color import RGBColor
 from pptx.util import Inches, Pt
 
 
-def program_pptx(program, module_id=None):
+def program_pptx(program, module_id=None, topic_ids=None):
     materials = program.get("materials", {})
     if module_id and module_id not in materials:
         raise HTTPException(409, "Материалы модуля ещё не готовы")
     modules = [materials[module_id]] if module_id else list(materials.values())
-    slides = [s for m in modules for lecture in m.get("lectures", []) for s in lecture.get("slides", [])]
+    slides = [s for m in modules for lecture in m.get("lectures", []) if topic_ids is None or lecture.get('topicId') in topic_ids for s in lecture.get("slides", [])]
     if not 1 <= len(slides) <= 300:
         raise HTTPException(422, "Выгружайте отдельный модуль: допустимо 1–300 слайдов")
     skeleton = program["skeleton"]

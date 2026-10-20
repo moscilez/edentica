@@ -93,7 +93,7 @@ class Models:
         await self.query("execute", "DELETE FROM model_connections WHERE id=%s AND user_id=%s", (id, owner))
         return {"ok": True}
 
-    async def complete(self, owner, skill, payload, fallback, selected=False):
+    async def complete(self, owner, skill, payload, fallback, selected=False,response_schema=None):
         row = await self.selected(owner) if selected is False else selected
         if row:
             try:Settings.load().validate_endpoint(row['base_url'],row['model'])
@@ -102,19 +102,25 @@ class Models:
                 key = cipher().decrypt(row["encrypted_key"].encode()).decode()
             except InvalidToken:
                 raise ValueError("Не удалось расшифровать подключение. Проверьте ключ сервера.") from None
-            result = await compatible(row["base_url"], key, row["model"], skill, payload)
+            result = await compatible(row["base_url"], key, row["model"], skill, payload,response_schema=response_schema)
             result["connection"] = row["id"]
             return result
         ensure(await self.system_allowed(owner),'Добавьте личное подключение ИИ или запросите у администратора доступ к модели сервера',403)
-        return await fallback(skill, payload)
+        import inspect
+        parameters=inspect.signature(fallback).parameters
+        if 'response_schema' in parameters or any(p.kind==inspect.Parameter.VAR_KEYWORD for p in parameters.values()):
+            return await fallback(skill,payload,response_schema=response_schema)
+        return await fallback(skill, payload)  # Compatible test/local providers.
 
 
-async def compatible(base, key, model, skill, payload, max_tokens=None, *, allow_private=False, json_mode=False):
+async def compatible(base, key, model, skill, payload, max_tokens=None, *, allow_private=False, json_mode=False,response_schema=None):
     request_payload={"model": model, "stream": False, "temperature": .2,
                  **({'max_tokens':max_tokens} if max_tokens is not None else {}),
                  **({'response_format':{'type':'json_object'}} if json_mode else {}),
                  "messages": [{"role": "system", "content": skill},
                               {"role": "user", "content": json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}]}
+    if response_schema and Settings.load().structured_output:
+        request_payload['response_format']={'type':'json_schema','json_schema':{'name':'educational_material','strict':True,'schema':response_schema}}
     for attempt in range(3):
         try:
             code, headers, raw = await public_request("POST", base.rstrip("/") + "/chat/completions",
@@ -123,6 +129,10 @@ async def compatible(base, key, model, skill, payload, max_tokens=None, *, allow
         except (httpx.TransportError,TimeoutError):
             if attempt==2:raise HTTPException(503,'Нет связи с моделью. Результаты сохранены; повторите этап позже.') from None
             code=503;headers={}
+        if code==400 and request_payload.get('response_format',{}).get('type')=='json_schema' and attempt<2:
+            logger.warning('structured_output_unavailable',extra={'status':code})
+            request_payload['response_format']={'type':'json_object'}
+            continue  # Provider capability fallback; local validation is mandatory.
         if code not in (408,429,500,502,503,504) or attempt==2:break
         logger.warning('llm_retry',extra={'attempt':attempt+1,'status':code})
         retry=headers.get('retry-after','')

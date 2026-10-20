@@ -45,7 +45,7 @@ def test_no_program_quota_usage_isolated_cache_not_charged(postgres_url):
     with TestClient(create_app(postgres_url,complete),base_url='http://localhost') as c:
         assert c.get('/api/usage').status_code==401
         register(c)
-        p=action(c,'create',request='Проверка кеша '+uuid4().hex)
+        p=action(c,'create',request='Общеразвивающая программа на 16 часов. Проверка кеша '+uuid4().hex)
         p['usage']['inputTokens']=900000;p['tokenBudget']=1
         c.app.state.db.execute('UPDATE program_projects SET document=%s WHERE id=%s',(Jsonb(p),p['id']))
         action(c,'analyze',id=p['id']);assert wait(c,p['id'])['state']=='skeleton_review'

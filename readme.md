@@ -36,7 +36,7 @@ docker compose --env-file .env.docker --profile test run --rm test
 - public — интерфейс; рабочая точка входа program-studio.html, расширение workspace.js.
 - deploy — Nginx и образ frontend.
 - backend/resources/skills.json — инструкции навыков и состав двух шаблонов АЦР.
-- backend/contracts.py, planning.py, validation.py — типизированный ввод, точное распределение часов, проверки комплекта.
+- backend/contracts.py, output_contracts.py, planning.py, validation.py, acceptance.py — типизированный ввод, точное распределение часов, проверки комплекта.
 - src/programs — прежняя реализация Node.js; рабочий Python backend её не вызывает.
 - templates — шаблоны АЦР для DOCX.
 - tests_python — проверки на изолированных PostgreSQL БД.
@@ -53,7 +53,7 @@ docker compose --env-file .env.docker --profile test run --rm test
 
 Выгрузки: DOCX, PPTX, GIFT, JSON, читаемый HTML-отчёт и ZIP всего комплекта. Node.js и npm в серверном Docker-образе не требуются.
 
-[API, конфигурация и воспроизводимая проверка](docs/workflow.md) · [Разбор замечаний оценки](docs/review-20261019.md).
+[API, конфигурация и воспроизводимая проверка](docs/workflow.md) · [Первый разбор замечаний](docs/review-20261019.md) · [Исправления и результаты пяти кейсов](docs/remediation-20261019.md) · [Отчёт прогона с токенами и артефактами](docs/verification-20261020.json).
 
 Сетевая доступность источника не подтверждает его содержание или актуальность нормативного документа. Неподтверждённые ссылки и профстандарты явно отмечаются; перед публикацией нужна экспертная проверка.
 

@@ -72,7 +72,7 @@ def test_single_entry_end_to_end_human_gate_and_all_exports(postgres_url,monkeyp
     if p.get('job',{}).get('state')!='running':return p
     time.sleep(.03)
    raise AssertionError('Workflow did not finish')
-  request='Программа повышения квалификации на 72 академических часа. Итоговая аттестация — защита проекта, 4 часа внутри 72.' if resume_after_failure else 'Полный запрос '+uuid4().hex
+  request='Программа повышения квалификации на 72 академических часа. Итоговая аттестация — защита проекта, 4 часа внутри 72.' if resume_after_failure else 'Общеразвивающая программа на 16 часов '+uuid4().hex
   p=post(request=request);p=wait(p['id'])
   assert p['state']=='skeleton_review',p.get('job')
   assert p['skeleton']['type']==('dpp' if resume_after_failure else 'general')
@@ -93,7 +93,7 @@ def test_single_entry_end_to_end_human_gate_and_all_exports(postgres_url,monkeyp
   assert p['report']['passed'],p['report']['errors']
   assert p['state']=='draft_ready'
   assert all(c['questions'] and c['assignments'] and c['topics'] for c in p['report']['coverage'])
-  assert len(p['report']['checks'])==5
+  assert len(p['report']['checks'])==6
   for format in ['docx','pptx','gift','json','report','zip']:
    r=c.post('/api/programs',headers=H,json={'action':'export','id':p['id'],'format':format})
    assert r.status_code==200,r.text[:300]

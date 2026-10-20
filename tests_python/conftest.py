@@ -24,6 +24,9 @@ def isolated_model_environment(monkeypatch):
         for suffix in ('BASE_URL', 'API_KEY', 'MODEL'):
             monkeypatch.setenv(f'{prefix}_{suffix}', '')
     monkeypatch.setenv('BRAVE_SEARCH_API_KEY', '')
+    async def research(query,references):
+        return {'searchAvailable':False,'evidence':[{'title':'Test-only documentation evidence','url':'https://docs.python.org/3/tutorial/','excerpt':'Изолированные данные тестового транспорта','status':'fetched'}]}
+    monkeypatch.setattr('backend.research.research',research)
 
 
 @pytest.fixture(scope="session")
