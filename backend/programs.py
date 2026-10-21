@@ -168,7 +168,7 @@ class Programs:
                          (str(uuid4()), p["id"], p["owner"], action, Jsonb(detail or {})))
 
     def revision(self, p):
-        fields = ("revision", "skeleton", "materials", "sections", "finalAssessment", "sources", "approval")
+        fields = ("revision", "skeleton", "materials", "sections", "finalAssessment", "sources", "approval", "requirements", "structured", "answers")
         snapshot = copy.deepcopy({k: p.get(k) for k in fields})
         p["history"] = (p.get("history", []) + [{**snapshot, "at": now()}])[-15:]
         p["revision"] += 1
@@ -506,6 +506,8 @@ class Programs:
                 self.revision(p)
                 for k in ("skeleton", "materials", "sections", "finalAssessment", "sources"):
                     p[k] = copy.deepcopy(snapshot.get(k))
+                for k in ('requirements','structured','answers'):
+                    if k in snapshot:p[k]=copy.deepcopy(snapshot[k])
                 p.update(approval=None, lessonDrafts={}, state="skeleton_review")
                 await self.save(p)
                 await self.event(p, "restored", {"revision": body["revision"]})
