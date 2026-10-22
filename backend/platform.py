@@ -33,11 +33,14 @@ def learner_lesson(lesson):
 
 
 def learning_issues(program):
+    from .learning_content import lecture_issues
     issues=[]
+    previous=[]
     for mid,module in program.get('materials',{}).items():
         for index,lecture in enumerate(module.get('lectures',[])):
-            if not isinstance(lecture.get('content'),str) or len(lecture['content'].strip())<200:
-                issues.append(f"{mid}, урок {index+1}: нужен учебный текст (от 200 символов), одного плана лекции недостаточно")
+            for message in lecture_issues(lecture,previous):
+                issues.append(f"{mid}, урок {index+1}: {message}")
+            previous.append(lecture)
     return issues
 
 

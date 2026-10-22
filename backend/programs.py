@@ -15,10 +15,10 @@ from fastapi import HTTPException
 from psycopg.types.json import Jsonb
 
 from . import cloudru
-from .codex_provider import CodexProvider
 from .exports import export_program
 from .models import Models
 from .config import Settings
+from .learning_content import lecture_issues, normalize_lecture
 from .contracts import Intake,Requirements,Lecture,LessonAssessment,Seminar,TestQuestion,Interview
 from .planning import build_skeleton,explicit_requirements,merge_requirements,schedule_question
 from .canonical import canonicalize_sections,normalize_criteria
@@ -119,14 +119,10 @@ class Programs:
     def __init__(self, db, rules, complete=None):
         self.db, self.rules = db, rules
         provider = os.getenv("LLM_PROVIDER", "cloudru").lower()
-        if provider not in ("cloudru", "codex"):
-            raise ValueError("LLM_PROVIDER должен быть cloudru или codex")
-        if provider == "codex" and os.getenv("EDENTICA_MODE") != "local":
-            raise ValueError("Codex разрешён только при EDENTICA_MODE=local. Для хакатона используйте cloudru.")
-        if provider == "codex" and (os.getenv("HOST") or "127.0.0.1") not in ("127.0.0.1", "localhost", "::1"):
-            raise ValueError("Локальный Codex-провайдер разрешён только на loopback HOST")
-        self.codex = CodexProvider() if provider == "codex" else None
-        self.complete = complete or (self.codex.complete if self.codex else cloudru.complete)
+        if provider != 'cloudru':
+            raise ValueError('Доступна только серверная модель Cloud.ru: LLM_PROVIDER=cloudru')
+        self.codex = None
+        self.complete = complete or cloudru.complete
         self.allow_unconfigured = complete is not None
         self.models = Models(db,allow_system=complete is not None)
         self.jobs = {}
@@ -199,12 +195,9 @@ class Programs:
         return result
 
     async def call(self, p, skill, payload):
-        connection = await self.models.selected(p["owner"])
-        if connection:
-            try:Settings.load().validate_endpoint(connection['base_url'],connection['model'])
-            except ValueError as error:raise HTTPException(403,str(error)) from None
-        profile = {"connectionId":connection["id"],"provider":connection["name"],"model":connection["model"],"localTesting":False,"personal":True} if connection else self.provider_status()
-        cache_key = hashlib.sha256(json.dumps([3,profile.get("connectionId"),profile.get("model"),self.skills.get(skill,skill),payload],ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+        connection = None
+        profile = self.provider_status()
+        cache_key = hashlib.sha256(json.dumps([6 if skill=='lesson' else 3,profile.get("connectionId"),profile.get("model"),self.skills.get(skill,skill),payload],ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).hexdigest()
         async with self.cache_locks.setdefault((p['owner'],cache_key),asyncio.Lock()):
             return await self._call_locked(p,skill,payload,profile,connection,cache_key)
 
@@ -250,8 +243,11 @@ class Programs:
             count=payload.get('requirements',{}).get('portfolioItems')
             if count and len((result['value'].get('finalAssessment') or {}).get('items',[]))!=count:cacheable=False
         elif cacheable and skill in ('lesson','assessment'):
-            try:(Lecture if skill=='lesson' else LessonAssessment).model_validate(result['value'])
-            except ValidationError:cacheable=False
+            try:
+                normalized=normalize_lecture(result['value']) if skill=='lesson' else result['value']
+                (Lecture if skill=='lesson' else LessonAssessment).model_validate(normalized)
+                if skill=='lesson':cacheable=not lecture_issues(normalized)
+            except (ValidationError,ValueError):cacheable=False
         elif cacheable and skill in ('assignment','questions','interview'):
             key,contract={'assignment':('seminars',Seminar),'questions':('questions',TestQuestion),'interview':('interviews',Interview)}[skill]
             values=result['value'].get(key)
@@ -292,12 +288,10 @@ class Programs:
         usage["model"] = result.get("model") or profile["model"]
         usage["provider"] = profile["provider"]
         usage["localTesting"] = profile["localTesting"]
-        incoming, outgoing = os.getenv("CLOUDRU_INPUT_RUB_PER_MILLION"), os.getenv("CLOUDRU_OUTPUT_RUB_PER_MILLION")
-        cloud_usage = usage["byProvider"].get("cloudru", {})
-        try:
-            usage["estimatedRubles"] = (cloud_usage.get("inputTokens", 0) * float(incoming) + cloud_usage.get("outputTokens", 0) * float(outgoing)) / 1e6 if incoming and outgoing and not self.codex and not profile.get("personal") else None
-        except ValueError:
-            usage['estimatedRubles']=None
+        from .usage import cost
+        priced=await self.query('one',"""SELECT coalesce(sum(input_tokens),0) AS incoming,coalesce(sum(output_tokens),0) AS outgoing
+            FROM llm_usage_events WHERE owner=%s AND project_id=%s AND lower(model) IN ('gigachat/gigachat-3-pro','gigachat-3-pro')""",(p['owner'],p['id']))
+        usage['estimatedRubles']=cost(priced['incoming'],priced['outgoing'])['totalRubles']
 
     async def launch(self, p, kind, work):
         async with self.launch_lock:
@@ -383,7 +377,7 @@ class Programs:
                 for event in events:
                     event["detail"] = json.dumps(event["detail"], ensure_ascii=False)
                 from .reporting import workflow
-                return {**p,'workflow':workflow(p), "report": await self.rules.call("inspectProgram", p) if p.get("skeleton") else None, "events": events}
+                return {**p,'contentQuality':{mid:[{'lesson':l['title'],'issues':lecture_issues(l)} for l in material.get('lectures',[]) if lecture_issues(l)] for mid,material in p['materials'].items()},'workflow':workflow(p), "report": await self.rules.call("inspectProgram", p) if p.get("skeleton") else None, "events": events}
             if action == "messages":
                 from .chat import messages
                 return await messages(self,p)
@@ -709,7 +703,7 @@ class Programs:
         for index, module in enumerate(modules):
             p["job"].update(step="Материалы: " + module["title"], completed=index)
             await self.save(p)
-            if not target and p["materials"].get(module["id"]) and not await self.rules.call("inspectModule", p["materials"][module["id"]], module, p["skeleton"],p['requirements'].get('currentControl')=='interview' or bool(p['requirements'].get('testQuestionCount'))):
+            if not target and p["materials"].get(module["id"]) and not any(lecture_issues(l) for l in p["materials"][module["id"]].get("lectures",[])) and not await self.rules.call("inspectModule", p["materials"][module["id"]], module, p["skeleton"],p['requirements'].get('currentControl')=='interview' or bool(p['requirements'].get('testQuestionCount'))):
                 continue
             candidate, issues = None, None
             all_modules = p["skeleton"]["modules"]
@@ -788,12 +782,13 @@ class Programs:
             question_quota=(quotas or {}).get(topic['id'],quota//len(module['topics'])+(index<quota%len(module['topics']))) if quota is not None else None
             candidate=saved.get(topic['id'])
             needs_interview=p['requirements'].get('currentControl') in ('interview','mixed') or question_quota==0
-            if not candidate or inspect_module(candidate,part,p['skeleton'],question_quota==0) or question_quota is not None and len(candidate.get('questions',[]))!=question_quota or needs_interview and not candidate.get('interviews'):
+            if not candidate or inspect_module(candidate,part,p['skeleton'],question_quota==0) or question_quota is not None and len(candidate.get('questions',[]))!=question_quota or needs_interview and not candidate.get('interviews') or any(lecture_issues(l) for l in candidate.get('lectures',[])):
                 p['job']['step']='Урок: '+topic['title'];await self.save(p)
                 refs=await self.references(p,topic['title'])
                 evidence=await research(topic['title']+' '+module['title'],refs)
                 p.setdefault('research',{})[topic['id']]=evidence
-                payload={'request':p['request'],'requirements':p['requirements'],'module':part,'questionQuota':question_quota,'instruction':instruction,
+                previous=[l for m in p['materials'].values() for l in m.get('lectures',[])]+[l for draft in saved.values() for l in draft.get('lectures',[])]
+                payload={'alreadyCovered':[{'title':l['title'],'topicId':l.get('topicId')} for l in previous if l.get('topicId')!=topic['id']], 'request':p['request'],'requirements':p['requirements'],'module':part,'questionQuota':question_quota,'instruction':instruction,
                          'competencies':[c for c in p['skeleton']['competencies'] if c['id'] in topic['competencyIds']],
                          'referenceExcerpts':refs,'webEvidence':evidence}
                 candidate=candidate if isinstance(candidate,dict) else {}
@@ -801,13 +796,17 @@ class Programs:
                 try:
                     if len(lectures)!=1:raise ValueError('Нужна одна лекция')
                     Lecture.model_validate(lectures[0])
+                    quality=lecture_issues(lectures[0],previous)
+                    if quality:raise ValueError('; '.join(quality))
                 except (ValueError,ValidationError):
                     issues=None
                     for attempt in range(2):
                         try:
                             lecture=await self.call(p,'lesson',{**payload,'validationErrors':issues})
-                            lecture=bind_lesson_item(lecture,topic,'lecture')
+                            lecture=normalize_lecture(bind_lesson_item(lecture,topic,'lecture'))
                             Lecture.model_validate(lecture)
+                            quality=lecture_issues(lecture,previous)
+                            if quality:raise ValueError('; '.join(quality))
                             if lecture['topicId']!=topic['id'] or not set(lecture['competencyIds'])<=set(topic['competencyIds']):
                                 raise ValueError('Используй точные topicId и competencyIds из темы')
                             issues=None;break

@@ -118,6 +118,58 @@ class Lecture(LinkedMaterial):
     slides:list[Slide]=Field(min_length=1,max_length=20)
 
 
+class LectureBlock(BaseModel):
+    kind:Literal['heading','paragraph','bullet','code','callout']
+    text:str=Field(max_length=6000)
+    lines:list[str]=Field(max_length=100)
+
+
+class BlockLecture(LinkedMaterial):
+    title:str
+    plan:str
+    blocks:list[LectureBlock]=Field(min_length=6,max_length=60)
+    slides:list[Slide]=Field(min_length=1,max_length=20)
+
+
+class CodeExample(BaseModel):
+    language:Literal['python','sql','javascript','text','bash','json']
+    lines:list[str]=Field(min_length=1,max_length=100)
+
+
+class WorkedExample(BaseModel):
+    context:str=Field(min_length=100,max_length=6000)
+    steps:list[str]=Field(min_length=2,max_length=10)
+    code:list[CodeExample]=Field(max_length=3)
+    result:str=Field(min_length=80,max_length=4000)
+
+
+class LessonPractice(BaseModel):
+    task:str=Field(min_length=100,max_length=4000)
+    expectedResult:str=Field(min_length=25,max_length=2000)
+
+
+class SelfCheck(BaseModel):
+    question:str=Field(min_length=10,max_length=1000)
+    answer:str=Field(min_length=40,max_length=2000)
+
+
+class LessonMistake(BaseModel):
+    error:str=Field(min_length=10,max_length=1000)
+    correction:str=Field(min_length=40,max_length=2000)
+
+
+class GeneratedLecture(LinkedMaterial):
+    title:str
+    plan:str
+    explanation:list[str]=Field(min_length=2,max_length=8)
+    workedExample:WorkedExample
+    practice:LessonPractice
+    mistakes:list[LessonMistake]=Field(min_length=1,max_length=4)
+    selfCheck:list[SelfCheck]=Field(min_length=2,max_length=5)
+    takeaways:list[str]=Field(min_length=2,max_length=5)
+    slides:list[Slide]=Field(min_length=1,max_length=20)
+
+
 class LessonMaterial(BaseModel):
     moduleId:str
     summary:str=Field(min_length=1)

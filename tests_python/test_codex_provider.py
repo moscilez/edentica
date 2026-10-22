@@ -10,7 +10,7 @@ from backend.programs import Programs
 def test_local_provider_cannot_be_enabled_in_hackathon(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "codex")
     monkeypatch.setenv("EDENTICA_MODE", "hackathon")
-    with pytest.raises(ValueError, match="local"):
+    with pytest.raises(ValueError, match="Cloud.ru"):
         Programs(None, None)
 
 
@@ -32,7 +32,7 @@ def test_local_provider_rejects_public_bind(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "codex")
     monkeypatch.setenv("EDENTICA_MODE", "local")
     monkeypatch.setenv("HOST", "0.0.0.0")
-    with pytest.raises(ValueError, match="loopback"):
+    with pytest.raises(ValueError, match="Cloud.ru"):
         Programs(None, None)
 
 

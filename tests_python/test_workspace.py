@@ -1,3 +1,4 @@
+from tests_python.lesson_samples import educational_text
 import asyncio
 import copy
 import time
@@ -35,7 +36,7 @@ def test_two_party_publication_immutable_lessons_and_learning(client):
     p['demo']=False
     for module in p['materials'].values():
         for lecture in module['lectures']:
-            lecture['content']='Полный учебный материал для тестового сценария. '+('Объяснение понятия, практический пример и проверка понимания. '*8)
+            lecture['content']=educational_text({'id':lecture['topicId']})
     from psycopg.types.json import Jsonb
     client.app.state.db.execute('UPDATE program_projects SET document=%s WHERE id=%s',(Jsonb(p),p['id']))
     assert a(client,'approve',id=p['id'],confirm=True,expectedRevision=p['revision']).status_code==200
@@ -113,23 +114,16 @@ def test_two_party_publication_immutable_lessons_and_learning(client):
     assert call(client,'course',id=release).status_code==200
 
 
-def test_encrypted_models_are_per_user_and_profile_role_cannot_be_escalated(client,monkeypatch):
-    monkeypatch.setenv('APP_ENCRYPTION_KEY',Fernet.generate_key().decode())
+def test_personal_model_routes_removed_and_profile_role_cannot_be_escalated(client):
     owner,_=reg(client,'methodist')
-    fake='non-live-unit-test-secret'
-    r=client.post('/api/connections',headers=H,json={'action':'save','name':'test','baseUrl':'https://example.com/v1','model':'unit','apiKey':fake})
-    assert r.status_code==200,r.text
-    assert fake not in r.text and 'encrypted_key' not in r.text
-    saved=r.json()[0]['id']
-    row=client.app.state.db.one('SELECT encrypted_key FROM model_connections WHERE id=%s',(saved,))
-    assert fake not in row['encrypted_key']
-    other,_=reg(client,'methodist')
-    assert client.post('/api/connections',headers=H,json={}).json()==[]
-    assert client.post('/api/connections',headers=H,json={'action':'select','id':saved}).status_code==404
+    for action in ('save','select','remove'):
+        assert client.post('/api/connections',headers=H,json={'action':action}).status_code==410
+    client.app.state.db.execute("INSERT INTO model_connections(id,user_id,name,base_url,model,encrypted_key) VALUES(%s,%s,'legacy','https://api.openai.com/v1','gpt-4','invalid-key')",(str(uuid4()),owner['id']))
+    assert asyncio.run(client.app.state.models.selected(owner['id'])) is None
+    status=client.get('/api/agent').json()
+    assert not status.get('personal') and not status.get('connectionId')
     r=client.post('/api/profile',headers=H,json={'name':'Изменённое ФИО','login':'new-'+uuid4().hex,'role':'expert'})
     assert r.status_code==200 and r.json()['role']=='methodist'
-    reg(client,'learner')
-    assert client.post('/api/connections',headers=H,json={}).status_code==403
 
 
 @pytest.mark.parametrize('url',['http://example.com','https://localhost/v1','https://a.local/v1','https://name:secret@example.com','https://example.com:9000/v1'])
@@ -156,7 +150,8 @@ def test_lesson_exports_are_portable_and_reimportable():
     assert lesson['title'] in '\n'.join(x.text for x in Document(BytesIO(docx.body)).paragraphs)
     assert len(Presentation(BytesIO(export_lesson(p,lesson['id'],'pptx').body)).slides)>1
     assert len(PdfReader(BytesIO(export_lesson(p,lesson['id'],'pdf').body)).pages)>0
-    assert len(PdfReader(BytesIO(export_lesson(p,lesson['id'],'slides-pdf').body)).pages)==len(lesson['slides'])
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException):export_lesson(p,lesson['id'],'slides-pdf')
 
 
 def test_public_http_startup_is_rejected_before_database_access(monkeypatch):

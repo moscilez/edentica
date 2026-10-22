@@ -1,3 +1,4 @@
+from tests_python.lesson_samples import educational_text
 import asyncio
 import base64
 import copy
@@ -163,7 +164,7 @@ def test_real_orchestration_with_mock_provider(postgres_url,monkeypatch):
             original=next(iter(fixture['materials'].values()))
             if 'JSON-объект лекции' in skill:
                 value=copy.deepcopy(original['lectures'][0])
-                value.update(topicId=topic['id'],competencyIds=topic['competencyIds'])
+                value.update(topicId=topic['id'],competencyIds=topic['competencyIds'],content=educational_text(topic))
                 if payload.get('instruction'):value['title']='Точечно обновлённое содержание'
             else:
                 value={}
@@ -307,7 +308,7 @@ def test_cloudru_http_contract_without_real_calls(monkeypatch):
     from types import SimpleNamespace
     from backend import cloudru
     monkeypatch.setenv("CLOUDRU_API_KEY", "test-key-only")
-    monkeypatch.setenv("CLOUDRU_MODEL", "test-model-only")
+    monkeypatch.setenv("CLOUDRU_MODEL", "GigaChat/test-model-only")
     replies = [
         {"choices": [{"message": {"content": '```json\n{"ok":true}\n```'}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 20, "completion_tokens": 8}},
         {"choices": [{"message": {"content": "{}"}, "finish_reason": "length"}]},
@@ -316,7 +317,7 @@ def test_cloudru_http_contract_without_real_calls(monkeypatch):
     async def handle(method,url,**kwargs):
         assert url == "https://foundation-models.api.cloud.ru/v1/chat/completions"
         assert kwargs['headers']["Authorization"] == "Bearer test-key-only"
-        assert kwargs['payload']["model"] == "test-model-only"
+        assert kwargs['payload']["model"] == "GigaChat/test-model-only"
         return 200,{},json.dumps(replies.pop(0)).encode()
     monkeypatch.setattr('backend.models.public_request',handle)
     result = asyncio.run(cloudru.complete("test instruction", {"request": "test"}))

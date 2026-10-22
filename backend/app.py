@@ -237,25 +237,6 @@ def create_app(database_url=None, complete=None):
             raise HTTPException(409,"Логин занят") from None
         return {**account,"name":name,"login":login}
 
-    @app.post("/api/connections")
-    async def connections(request: Request):
-        account = await user(request)
-        ensure(account["role"] == "methodist", "Настройки ИИ доступны методисту",403)
-        data = await body(request)
-        if data.get("action") == "save":
-            return await app.state.models.save(account["id"],data)
-        if data.get("action") == "remove":
-            return await app.state.models.remove(account["id"],required(data.get("id"),80))
-        if data.get("action") == "select":
-            id = data.get("id")
-            def select():
-                with app.state.db.pool.connection() as c:
-                    c.execute("SELECT id FROM users WHERE id=%s FOR UPDATE",(account["id"],))
-                    ensure(not id or c.execute("SELECT 1 FROM model_connections WHERE id=%s AND user_id=%s",(id,account["id"])).fetchone(),"Подключение не найдено",404)
-                    c.execute("UPDATE model_connections SET enabled=(id=%s) WHERE user_id=%s",(id or "",account["id"]))
-            await asyncio.to_thread(select)
-        return await app.state.models.list(account["id"])
-
     @app.post("/api/platform")
     async def platform(request: Request):
         account = await user(request)
