@@ -235,7 +235,10 @@ def build_skeleton(outline,requirements):
             contact=parts['lecture']+parts['practice'];remote=contact//2 if re.search('заоч|дистанц',req['format'],re.I) else 0
             topic={'id':f'T{mi}.{ti}','title':t['title'],'totalHours':h,'hours':parts,
                    'delivery':{'inPerson':contact-remote,'remote':remote},'competencyIds':t['competencyIds']}
+            if t.get('lessonCount'):topic['lessonCount']=t['lessonCount']
             result['topics'].append(topic);result['totalHours']+=h;rows.append((topic['id'],h))
+        from .lesson_planning import lesson_slots
+        result['lessonPlan']=lesson_slots(result)
         modules.append(result)
     calendar=calendar_for(rows+[('final',final)],req)
     assumptions=outline['assumptions']+['Часы и календарь рассчитаны алгоритмом; распределение утверждает методист.']

@@ -150,6 +150,9 @@ def test_real_orchestration_with_mock_provider(postgres_url,monkeypatch):
     sections = asyncio.run(rules.call("config"))["templateSections"]
     async def probe(source):return {'access':'reachable','status':'unverified'}
     monkeypatch.setattr('backend.programs.probe_source',probe)
+    # Reuse the three fixture texts; separate quality tests cover duplicate detection.
+    from backend.learning_content import lecture_issues as check_lecture
+    monkeypatch.setattr('backend.programs.lecture_issues',lambda lesson,previous=():check_lecture(lesson))
     calls = []
     async def complete(skill, payload):
         calls.append(skill)
@@ -164,8 +167,8 @@ def test_real_orchestration_with_mock_provider(postgres_url,monkeypatch):
             original=next(iter(fixture['materials'].values()))
             if 'JSON-объект лекции' in skill:
                 value=copy.deepcopy(original['lectures'][0])
-                value.update(topicId=topic['id'],competencyIds=topic['competencyIds'],content=educational_text(topic))
-                if payload.get('instruction'):value['title']='Точечно обновлённое содержание'
+                value.update(title=payload.get('lesson',{}).get('title',topic['title']),topicId=topic['id'],competencyIds=topic['competencyIds'],content=educational_text(topic))
+                if payload.get('instruction'):value['title']='Точечно обновлённое содержание '+payload.get('lesson',{}).get('id','')
             else:
                 value={}
                 for kind in ('questions','seminars'):
@@ -197,7 +200,7 @@ def test_real_orchestration_with_mock_provider(postgres_url,monkeypatch):
         agent(client, "revise_module", id=id, moduleId="M1", instruction="Обновите пояснение")
         p = wait(client, id)
         assert p["materials"]["M2"] == untouched
-        assert p["materials"]["M1"]["summary"].strip() == "Точечно обновлённое содержание"
+        assert p["materials"]["M1"]["summary"].strip().startswith("Точечно обновлённое содержание")
         assert p["history"][-1]["materials"]["M1"]["summary"] != p["materials"]["M1"]["summary"]
         assert agent(client, "export", id=id, format="gift").status_code == 200
         source = p["sources"][0]

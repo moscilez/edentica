@@ -42,6 +42,9 @@ def test_hackathon_provider_policy_denies_before_transport(monkeypatch,base,mode
 def test_single_entry_end_to_end_human_gate_and_all_exports(postgres_url,monkeypatch,resume_after_failure):
  async def probe(source):return {'access':'reachable','status':'unverified'}
  monkeypatch.setattr('backend.programs.probe_source',probe)
+ # The transport fixture contains only three texts; duplication itself is checked independently.
+ from backend.learning_content import lecture_issues as check_lecture
+ monkeypatch.setattr('backend.programs.lecture_issues',lambda lesson,previous=():check_lecture(lesson))
  base=fixture();calls=[];lecture_calls=[];failed_once=[];bad_intro=[]
  async def model(skill,payload):
   calls.append(payload)
@@ -51,8 +54,8 @@ def test_single_entry_end_to_end_human_gate_and_all_exports(postgres_url,monkeyp
   elif 'Навык 3' in skill:
    m=payload['module'];t=m['topics'][0];original=next(iter(base['materials'].values()))
    if 'JSON-объект лекции' in skill:
-    lecture_calls.append(t['id'])
-    value=copy.deepcopy(original['lectures'][0]);value.update(topicId=t['id'],competencyIds=t['competencyIds'],content=educational_text(t))
+    lecture_calls.append(payload.get('lesson',{}).get('id',t['id']))
+    value=copy.deepcopy(original['lectures'][0]);value.update(title=payload.get('lesson',{}).get('title',t['title']),topicId=t['id'],competencyIds=t['competencyIds'],content=educational_text(t))
     if not resume_after_failure and not bad_intro:
      bad_intro.append(True);value['content']='Мы будем изучать тему. Вы научитесь решать задачи. Мы рассмотрим примеры. '*80
     return {'value':value,'usage':{'inputTokens':10,'outputTokens':20},'model':'contract-only'}
@@ -108,6 +111,10 @@ def test_single_entry_end_to_end_human_gate_and_all_exports(postgres_url,monkeyp
    assert len(lecture_calls)==len(set(lecture_calls)), 'Готовая лекция не должна генерироваться повторно'
   assert p['job']['state']=='completed',p['job']
   assert p['report']['passed'],p['report']['errors']
+  for module in p['skeleton']['modules']:
+   material=p['materials'][module['id']]
+   assert {l['lessonId'] for l in material['lectures']}=={slot['id'] for slot in module['lessonPlan']}
+   assert sum(l['hours'] for l in material['lectures'])==module['totalHours']
   assert p['state']=='draft_ready'
   assert all(c['questions'] and c['assignments'] and c['topics'] for c in p['report']['coverage'])
   assert len(p['report']['checks'])==6

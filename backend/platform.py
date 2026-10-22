@@ -21,7 +21,7 @@ def lessons(snapshot):
     for mid, module in snapshot.get("materials", {}).items():
         for i, lecture in enumerate(module.get("lectures", [])):
             topic = lecture.get("topicId")
-            questions = [q for q in module.get("questions", []) if q.get("topicId") == topic] if topic else (module.get("questions", []) if i == len(module["lectures"]) - 1 else [])
+            questions = [q for q in module.get("questions", []) if (q.get('lessonId')==lecture['lessonId'] if lecture.get('lessonId') and q.get('lessonId') else q.get("topicId") == topic)] if topic else (module.get("questions", []) if i == len(module["lectures"]) - 1 else [])
             result.append({"id": f"{mid}:{i}", "moduleId": mid, "title": lecture["title"],
                            "text": lecture.get("content") or lecture.get("plan", ""),
                            "slides": lecture.get("slides", []), "questions": questions})

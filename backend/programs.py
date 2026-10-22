@@ -18,6 +18,7 @@ from . import cloudru
 from .exports import export_program
 from .models import Models
 from .config import Settings
+from .lesson_planning import lesson_slots, coverage as lesson_coverage
 from .learning_content import lecture_issues, normalize_lecture
 from .contracts import Intake,Requirements,Lecture,LessonAssessment,Seminar,TestQuestion,Interview
 from .planning import build_skeleton,explicit_requirements,merge_requirements,schedule_question
@@ -308,7 +309,7 @@ class Programs:
         async def run():
             logger.info('job_started',extra={'jobId':p['job']['id'],'projectId':p['id'],'stage':kind})
             try:
-                async with asyncio.timeout(175 if kind in ("skeleton","intake") else 1180):
+                async with asyncio.timeout(175 if kind in ("skeleton","intake","revise_brief") else 1180):
                     await work(p)
                 p["job"]["state"] = "completed"
                 p["job"]["completed"] = p["job"]["total"]
@@ -377,7 +378,7 @@ class Programs:
                 for event in events:
                     event["detail"] = json.dumps(event["detail"], ensure_ascii=False)
                 from .reporting import workflow
-                return {**p,'contentQuality':{mid:[{'lesson':l['title'],'issues':lecture_issues(l)} for l in material.get('lectures',[]) if lecture_issues(l)] for mid,material in p['materials'].items()},'workflow':workflow(p), "report": await self.rules.call("inspectProgram", p) if p.get("skeleton") else None, "events": events}
+                return {**p,'lessonCoverage':{m['id']:lesson_coverage(m,p['materials'].get(m['id'])) for m in (p.get('skeleton') or {}).get('modules',[])},'contentQuality':{mid:[{'lesson':l['title'],'issues':lecture_issues(l)} for l in material.get('lectures',[]) if lecture_issues(l)] for mid,material in p['materials'].items()},'workflow':workflow(p), "report": await self.rules.call("inspectProgram", p) if p.get("skeleton") else None, "events": events}
             if action == "messages":
                 from .chat import messages
                 return await messages(self,p)
@@ -443,8 +444,31 @@ class Programs:
                     return await self.launch(p, "intake", self.analyze)
                 ensure(p["state"] in ("ready_for_skeleton", "skeleton_review"), "Сначала уточните требования")
                 return await self.launch(p, "skeleton", self.skeleton)
+            if action == "revise_brief":
+                ensure(p.get('skeleton'), 'Сначала создайте каркас')
+                ensure(body.get('expectedRevision') == p['revision'], 'Версия изменилась. Обновите программу.',409)
+                brief=body.get('brief',{})
+                ensure(isinstance(brief,dict),'Проверьте цель и требования')
+                fields=('title','goal','audience','entryLevel','format','assessment')
+                changes={k:required(brief.get(k),4000 if k=='goal' else 1000) for k in fields}
+                for key in ('totalHours','weeks'):
+                    if key in brief:changes[key]=brief[key]
+                if 'requiredTopics' in brief:
+                    ensure(isinstance(brief['requiredTopics'],list) and all(isinstance(x,str) and len(x)<=300 for x in brief['requiredTopics']),'Проверьте обязательные темы')
+                    changes['requiredTopics']=brief['requiredTopics']
+                baseline={k:p['skeleton'][k] for k in ('type','totalHours','audience','entryLevel','format','assessment','finalHours','selfStudyOnly') if k in p['skeleton']}
+                baseline.update(p['skeleton'].get('constraints',{}))
+                try:updated=Requirements.model_validate({**baseline,**p['requirements'],**changes}).model_dump(exclude_none=True)
+                except ValidationError:raise HTTPException(422,'Проверьте часы, срок и требования') from None
+                if changes.get('weeks')!=p['requirements'].get('weeks'):
+                    updated.pop('durationMonths',None);updated.pop('approximateDuration',None)
+                return await self.launch(p,'revise_brief',lambda current:self.revise_brief(current,updated,changes))
             if action == "edit_skeleton":
                 ensure(body.get("expectedRevision") == p["revision"], "Версия изменилась. Обновите программу.", 409)
+                try:
+                    for module in (body.get('skeleton') or {}).get('modules',[]):
+                        if module.get('lessonPlan') or any(t.get('lessonCount') for t in module.get('topics',[])):module['lessonPlan']=lesson_slots(module)
+                except ValueError as error:raise HTTPException(422,str(error)) from None
                 report = await self.rules.call("inspectSkeleton", body.get("skeleton"), p["requirements"])
                 ensure(not report["errors"], "; ".join(x["message"] for x in report["errors"]))
                 old, new, kept = p.get("skeleton", {}), body["skeleton"], {}
@@ -478,7 +502,7 @@ class Programs:
                 target = next((m for m in p["skeleton"]["modules"] if m["id"] == body.get("moduleId")), None) if action in ("generate_module", "revise_module") else None
                 if action == "generate_module":
                     ensure(target, "Модуль не найден", 404)
-                    ensure(target["id"] not in p["materials"], "Модуль уже готов. Используйте доработку модуля", 409)
+                    ensure(target["id"] not in p["materials"] or lesson_coverage(target,p["materials"].get(target["id"]))["missing"], "Модуль уже готов. Используйте доработку модуля", 409)
                 if action == "revise_module":
                     ensure(target and target["id"] in p["materials"], "Модуль не найден или ещё не создан")
                     required(body.get("instruction"), 6000)
@@ -639,7 +663,18 @@ class Programs:
                 p['notes'].append('Предложенная структура требует исправления. Отдельный навык каркаса проверит требования повторно.')
         await self.save(p)
 
-    async def skeleton(self, p):
+    async def revise_brief(self,p,requirements,changes):
+        draft=copy.deepcopy(p)
+        draft["job"]=p["job"]
+        draft["requirements"]=requirements
+        draft["briefChanges"]=changes
+        candidate=await self.skeleton(draft,commit=False)
+        self.revision(p)
+        p.update(skeleton=candidate,requirements=requirements,structured={**p.get("structured",{}),**changes},answers={**p.get("answers",{}),**changes},materials={},lessonDrafts={},sections={},finalAssessment=None,approval=None,research={},sources=[],state="skeleton_review")
+        await self.save(p)
+        await self.event(p,"brief_rebuilt",{"fields":list(changes)})
+
+    async def skeleton(self, p,commit=True):
         from .standards import candidates,normalize_standard
         p["job"]["step"] = "Карта компетенций и часы"
         candidate,issues=None,None
@@ -647,7 +682,7 @@ class Programs:
             try:
                 candidate=await self.call(p,'outline',{'request':p['request'],'requirements':p['requirements'],
                     'availableStandards':candidates(p['request']+' '+p['requirements'].get('audience','')) if p['requirements']['type']=='dpp' else [],
-                    'references':await self.references(p),'validationErrors':issues})
+                    'references':await self.references(p),'briefChanges':p.get('briefChanges'),'previousSkeleton':p.get('skeleton') if p.get('briefChanges') else None,'validationErrors':issues})
                 from .planning import unresolved_competencies,repair_competencies
                 missing_ids=unresolved_competencies(candidate)
                 if missing_ids and len(missing_ids)<=40:
@@ -655,6 +690,9 @@ class Programs:
                         'outline':candidate,'missingIds':missing_ids})
                     candidate=repair_competencies(candidate,repaired.get('competencies',[]))
                 candidate=build_skeleton(candidate,p['requirements'])
+                if p.get('briefChanges'):
+                    candidate['goal']=p['briefChanges']['goal']
+                    if p['briefChanges']['title']!=p['skeleton']['title']:candidate['title']=p['briefChanges']['title']
                 if p.get('referenceStatus',{}).get('mentionedButMissing'):candidate['assumptions'].append('Упомянутый референс не прикреплён. Каркас использует стандартный шаблон АЦР; документ можно добавить перед доработкой.')
                 for c in candidate['competencies']:c['standard']=normalize_standard(c.get('standard'))
                 available=candidates(p['request']+' '+p['requirements'].get('audience','')) if p['requirements']['type']=='dpp' else []
@@ -678,6 +716,7 @@ class Programs:
                 issues=[{'message':'Некорректный смысловой каркас: '+str(error)[:700]}]
             if not issues:break
         ensure(not issues, "Каркас не прошёл проверку: " + "; ".join(x["message"] for x in issues[:3]))
+        if not commit:return candidate
         self.revision(p)
         p.update(skeleton=candidate, materials={}, lessonDrafts={}, sections={}, finalAssessment=None, approval=None, state="skeleton_review")
         await self.save(p)
@@ -703,7 +742,7 @@ class Programs:
         for index, module in enumerate(modules):
             p["job"].update(step="Материалы: " + module["title"], completed=index)
             await self.save(p)
-            if not target and p["materials"].get(module["id"]) and not any(lecture_issues(l) for l in p["materials"][module["id"]].get("lectures",[])) and not await self.rules.call("inspectModule", p["materials"][module["id"]], module, p["skeleton"],p['requirements'].get('currentControl')=='interview' or bool(p['requirements'].get('testQuestionCount'))):
+            if not target and p["materials"].get(module["id"]) and not lesson_coverage(module,p["materials"].get(module["id"]))["missing"] and not any(lecture_issues(l) for l in p["materials"][module["id"]].get("lectures",[])) and not await self.rules.call("inspectModule", p["materials"][module["id"]], module, p["skeleton"],p['requirements'].get('currentControl')=='interview' or bool(p['requirements'].get('testQuestionCount'))):
                 continue
             candidate, issues = None, None
             all_modules = p["skeleton"]["modules"]
@@ -714,7 +753,7 @@ class Programs:
             quota=sum(quotas[t['id']] for t in module['topics']) if count else 0 if p['requirements'].get('currentControl')=='interview' else None
             if target:
                 self.revision(p)
-                p.setdefault('lessonDrafts',{}).pop(module['id'],None)
+                if instruction:p.setdefault('lessonDrafts',{}).pop(module['id'],None)
             candidate=await self.generate_lessons(p,module,quota,quotas,instruction)
             p['materials'][module['id']]=candidate
             for source in candidate.get('sources',[]):source['moduleId']=module['id']
@@ -777,18 +816,29 @@ class Programs:
         from .research import research
         saved=p.setdefault('lessonDrafts',{}).setdefault(module['id'],{})
         aggregate={'moduleId':module['id'],'summary':'','methodology':'','questions':[],'seminars':[],'interviews':[],'lectures':[],'sources':[]}
-        for index,topic in enumerate(module['topics']):
-            part={**module,'topics':[topic],'totalHours':topic['totalHours']}
-            question_quota=(quotas or {}).get(topic['id'],quota//len(module['topics'])+(index<quota%len(module['topics']))) if quota is not None else None
-            candidate=saved.get(topic['id'])
+        slots=lesson_slots(module)
+        research_cache={}
+        for index,slot in enumerate(slots):
+            topic=next(t for t in module['topics'] if t['id']==slot['topicId'])
+            lesson_topic={**topic,'title':slot['title'],'totalHours':slot['hours'],'hours':slot['activities']}
+            lesson_topic.pop('lessonCount',None)
+            lesson_topic.pop('delivery',None)
+            part={**module,'topics':[lesson_topic],'totalHours':slot['hours']}
+            part.pop('lessonPlan',None)
+            question_quota=1 if quota is None and len(slots)>75 else None
+            topic_quota=(quotas or {}).get(topic['id']) if quotas else None
+            if topic_quota is not None:question_quota=topic_quota//slot['count']+(slot['number']<=topic_quota%slot['count'])
+            elif quota is not None:question_quota=quota//len(slots)+(index<quota%len(slots))
+            candidate=saved.get(slot['id'])
             needs_interview=p['requirements'].get('currentControl') in ('interview','mixed') or question_quota==0
             if not candidate or inspect_module(candidate,part,p['skeleton'],question_quota==0) or question_quota is not None and len(candidate.get('questions',[]))!=question_quota or needs_interview and not candidate.get('interviews') or any(lecture_issues(l) for l in candidate.get('lectures',[])):
-                p['job']['step']='Урок: '+topic['title'];await self.save(p)
+                p['job']['step']='Урок '+str(index+1)+'/'+str(len(slots))+': '+slot['title'];await self.save(p)
                 refs=await self.references(p,topic['title'])
-                evidence=await research(topic['title']+' '+module['title'],refs)
+                if topic['id'] not in research_cache:research_cache[topic['id']]=await research(topic['title']+' '+module['title'],refs)
+                evidence=research_cache[topic['id']]
                 p.setdefault('research',{})[topic['id']]=evidence
-                previous=[l for m in p['materials'].values() for l in m.get('lectures',[])]+[l for draft in saved.values() for l in draft.get('lectures',[])]
-                payload={'alreadyCovered':[{'title':l['title'],'topicId':l.get('topicId')} for l in previous if l.get('topicId')!=topic['id']], 'request':p['request'],'requirements':p['requirements'],'module':part,'questionQuota':question_quota,'instruction':instruction,
+                previous=[l for mid,m in p['materials'].items() if mid!=module['id'] for l in m.get('lectures',[])]+[l for key,draft in saved.items() if key!=slot['id'] for l in draft.get('lectures',[])]
+                payload={'alreadyCovered':[{'title':l['title'],'topicId':l.get('topicId')} for l in previous if l.get('lessonId')!=slot['id']], 'lesson':slot,'lessonSequence':slots, 'request':p['request'],'requirements':p['requirements'],'module':part,'questionQuota':question_quota,'instruction':instruction,
                          'competencies':[c for c in p['skeleton']['competencies'] if c['id'] in topic['competencyIds']],
                          'referenceExcerpts':refs,'webEvidence':evidence}
                 candidate=candidate if isinstance(candidate,dict) else {}
@@ -804,8 +854,10 @@ class Programs:
                         try:
                             lecture=await self.call(p,'lesson',{**payload,'validationErrors':issues})
                             lecture=normalize_lecture(bind_lesson_item(lecture,topic,'lecture'))
+                            lecture.update(lessonId=slot['id'],hours=slot['hours'])
                             Lecture.model_validate(lecture)
                             quality=lecture_issues(lecture,previous)
+                            if any(l.get('title','').strip().casefold()==lecture['title'].strip().casefold() for l in previous):quality.append('У каждого урока должна быть своя конкретная тема и уникальное название')
                             if quality:raise ValueError('; '.join(quality))
                             if lecture['topicId']!=topic['id'] or not set(lecture['competencyIds'])<=set(topic['competencyIds']):
                                 raise ValueError('Используй точные topicId и competencyIds из темы')
@@ -814,7 +866,7 @@ class Programs:
                     ensure(not issues,'Лекция требует исправления: '+str(issues))
                     candidate={'moduleId':module['id'],'summary':lecture['title'],'methodology':'Изучение лекции, разбор примера и практическая работа.',
                                'lectures':[lecture],'questions':[],'seminars':[],'sources':[]}
-                    saved[topic['id']]=candidate;await self.save(p)
+                    saved[slot['id']]=candidate;await self.save(p)
                 issues=None
                 for attempt in range(2):
                     try:
@@ -833,7 +885,7 @@ class Programs:
                             oral=await self.call(p,'interview',{**payload,'lecture':candidate['lectures'][0]})
                             assessed['interviews']=oral.get('interviews',[])
                         for kind in ('questions','seminars','interviews'):
-                            if isinstance(assessed.get(kind),list):assessed[kind]=[bind_lesson_item(x,topic,kind,i) for i,x in enumerate(assessed[kind],1)]
+                            if isinstance(assessed.get(kind),list):assessed[kind]=[{**bind_lesson_item(x,topic,kind,i),'lessonId':slot['id']} for i,x in enumerate(assessed[kind],1)]
                         if question_quota is not None and isinstance(assessed.get('questions'),list) and len(assessed['questions'])>question_quota:
                             # Select the requested count from the generated bank rather
                             # than paying for an identical rewrite of excess questions.
@@ -854,7 +906,7 @@ class Programs:
                 candidate['sources'] += [{'title':x.get('title',x['url']),'url':x['url'],'kind':'documentation','topicId':topic['id'],
                     'reason':'Ссылка из референса или тематического каталога для '+topic['title']+'. Текст автоматически не получен и не использован как подтверждённое доказательство; требуется проверка экспертом.'}
                     for x in evidence.get('unavailable',[])]
-                saved[topic['id']]=candidate;await self.save(p)
+                saved[slot['id']]=candidate;await self.save(p)
                 await self.event(p,'lesson_completed',{'moduleId':module['id'],'topicId':topic['id']})
             aggregate['summary']+=candidate['summary']+'\n'
             aggregate['methodology']+=candidate['methodology']+'\n'

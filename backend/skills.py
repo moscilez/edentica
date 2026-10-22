@@ -24,7 +24,10 @@ def instructions(config):
     skills['intake']=skills['intake_basic']
     skills['outline']=('Навык 2 — смысловой каркас учебной программы. Не вычисляй часы и календарь: их считает алгоритм. '
         'Верни заполненный объект {title,goal,competencies:[{id,title,knowledge,abilities,skills,standard}],'
-        'modules:[{title,topics:[{title,competencyIds,weight}]}],assumptions:[строки]}. '
+        'modules:[{title,topics:[{title,competencyIds,weight,lessonCount}]}],assumptions:[строки]}. '
+        'lessonCount — число отдельных занятий темы, если явно задано пользователем, иначе null. Не обещай число лекций в свободном тексте. '
+        'При briefChanges перестрой все модули, темы и компетенции под новые цель и требования; previousSkeleton — только предыдущая версия. '
+        'Новые requirements и briefChanges важнее старого request. Адаптируй название, если изменился предмет курса. '
         'У КАЖДОЙ компетенции обязательны ВСЕ поля id,title,knowledge,abilities,skills,standard; '
         'title компетенции — краткое название наблюдаемого действия слушателя, его нельзя пропускать. '
         'Форма записи компетенции: {"id":"C1","title":"Название результата обучения",'
@@ -123,4 +126,8 @@ def instructions(config):
         'Если requirements.portfolioItems задано, finalAssessment.items содержит ровно столько объектов '
         '{title,requirements} с разными конкретными работами, а критерии портфолио в сумме 100 баллов. '
         'Сохрани заданную форму итоговой аттестации и контекст аудитории.'+common)
+    skills['lesson']+=('\nПоле lesson задаёт ОДИН конкретный урок (number/count, часы). lessonSequence — последовательность занятий. '
+        'Дай этому уроку собственное конкретное title по его узкой теме, а не название всего модуля. '
+        'Раскрой только соответствующую часть темы, соразмерную lesson.hours; следующие занятия раскроют остальное. '
+        'Учитывай alreadyCovered и не повторяй содержание предыдущих уроков. Каждый урок — полноценный материал, не анонс. ')
     return skills

@@ -61,6 +61,7 @@ class Competency(BaseModel):
 
 
 class OutlineTopic(BaseModel):
+    lessonCount:StrictInt|None=Field(default=None,ge=1,le=150)
     title:str=Field(min_length=1,max_length=300)
     competencyIds:list[str]=Field(min_length=1,max_length=40)
     weight:int=Field(default=1,ge=1,le=100)

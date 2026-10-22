@@ -148,6 +148,10 @@ def inspect_module(content,module,skeleton,allow_empty_questions=False):
                     slides=item.get('slides')
                     if not text(item.get('title'),300) or not text(item.get('plan'),20000) or not isinstance(slides,list) or not 1<=len(slides)<=20 or any(not all(text(x.get(k),n) for k,n in [('title',180),('text',650),('notes',10000)]) for x in slides):bad('Лекция требует плана и слайдов с заметками')
                     if not text(item.get('content'),60000) or len(item.get('content',''))<200:bad('Нужен полный учебный текст лекции, а не только план (не менее 200 символов)')
+        if module.get('lessonPlan'):
+            from .lesson_planning import coverage
+            missing=coverage(module,content)['missing']
+            if missing:bad('Не подготовлены отдельные уроки: '+', '.join(x['id'] for x in missing))
         for t in module['topics']:
             if not any(x.get('topicId')==t['id'] for x in content.get('lectures',[])):bad('Нет учебного материала темы '+t['id'])
         for item in content.get('interviews',[]):
