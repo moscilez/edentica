@@ -70,3 +70,25 @@
 .review-expert-picker>button{justify-self:start;max-width:100%;white-space:normal}
 #review-state #send-review{margin:0 0 16px;max-width:100%;white-space:normal}
 .review-expert-picker .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* Authoring workflow and readable learning materials. */
+.publication-panel #owner-comment{display:grid;gap:16px;margin:24px 0}
+.publication-panel #owner-comment button{justify-self:start;margin:0}
+.publication-panel #publish-course{margin-top:12px;white-space:normal}
+.material-actions{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 24px}
+.tabs{gap:8px;flex-wrap:wrap}
+.reading-text{white-space:normal;max-width:74ch;line-height:1.75;font-size:17px;overflow-wrap:anywhere}
+.reading-text p{margin:0 0 1.2em}
+.reading-text h3{font-size:1.25em;line-height:1.4;margin:1.8em 0 .8em;scroll-margin-top:24px}
+.reading-text ul{padding-left:1.5em;margin:1em 0 1.5em}.reading-text li{margin:.5em 0}
+.reading-text pre,.slide pre{background:#25252f;color:#f5f5fa;padding:20px;border-radius:12px;overflow:auto;white-space:pre;font-size:14px;line-height:1.6;tab-size:4}
+.learning-callout{background:#f1ecfb;border-left:4px solid #9574db;padding:16px 20px;margin:20px 0;border-radius:0 10px 10px 0}
+.slide-type{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:#7953ba;margin-bottom:16px}
+.slide-body p{white-space:normal;line-height:1.6}.slide-body h3{font-size:16px}.slide-body ul{padding-left:20px}
+.slide-steps .slide-body ul{list-style:none;padding:0;counter-reset:steps}
+.slide-steps .slide-body li{counter-increment:steps;padding:12px 14px;margin:10px 0;background:#eee9fa;border-radius:10px}
+.slide-steps .slide-body li:before{content:counter(steps);display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;background:#c5f779;border-radius:50%;margin-right:12px}
+.slide-example{background:#25252f;color:#fff}.slide-example .slide-type{color:#c5f779}
+.slide-summary{background:#eef7e3}.slide-comparison .slide-body ul{display:grid;grid-template-columns:1fr 1fr;gap:12px;list-style:none;padding:0}
+.slide-comparison .slide-body li{padding:16px;border-radius:10px;background:#eee9fa}
+@media(max-width:600px){.publication-panel #owner-comment button,.publication-panel #publish-course,.material-actions button{width:100%}.reading-text{font-size:16px}.slide-comparison .slide-body ul{grid-template-columns:1fr}}

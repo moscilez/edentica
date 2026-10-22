@@ -5,6 +5,8 @@ from fastapi import HTTPException
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.util import Inches, Pt
+from pptx.enum.shapes import MSO_SHAPE
+import re
 
 
 def program_pptx(program, module_id=None, topic_ids=None):
@@ -45,7 +47,34 @@ def program_pptx(program, module_id=None, topic_ids=None):
             if part:
                 title += " · продолжение"
             box(title, .6, 1, 12, 1.5, 20 if len(title)>150 else 26 if len(title) > 90 else 32, "202126", True)
-            box(chunk, .6, 2.6, 12, 4.15, 20, "202126")
+            layout=content.get('layout') or ('concept','steps','example','summary')[index%4]
+            def card(x,y,w,h,color='EEE9FA'):
+                shape=slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,Inches(x),Inches(y),Inches(w),Inches(h))
+                shape.fill.solid();shape.fill.fore_color.rgb=RGBColor.from_string(color)
+                shape.line.fill.background()
+            labels={'concept':'КЛЮЧЕВОЙ ПРИНЦИП','steps':'ШАГ ЗА ШАГОМ','comparison':'СРАВНЕНИЕ','example':'РАЗБОР ПРИМЕРА','summary':'ЧТО ЗАПОМНИТЬ'}
+            box(labels.get(layout,'МАТЕРИАЛ УРОКА'),.65,2.25,11,.3,11,'7A52E9',True)
+            rows=[re.sub(r'^\s*(?:[-*•]|\d+[.)])\s+','',x).strip() for x in chunk.split('\n') if x.strip()]
+            if layout=='steps' and 2<=len(rows)<=5:
+                height=min(1.0,3.9/len(rows))
+                for n,row in enumerate(rows):
+                    y=2.8+n*height;card(.6,y,.55,.5,'C5F779');box(str(n+1),.72,y+.05,.35,.35,16,'202126',True)
+                    box(row,1.4,y,11,height-.07,17 if len(row)>130 else 20,'202126')
+            elif layout=='comparison' and len(rows)>=2:
+                # Keep both alternatives visible, without discarding any rows.
+                middle=(len(rows)+1)//2
+                for n,part_rows in enumerate((rows[:middle],rows[middle:])):
+                    x=.6+6.2*n;card(x,2.8,5.9,3.8,'EEE9FA' if n==0 else 'EAF5DE')
+                    box('\n\n'.join(part_rows),x+.25,3.05,5.4,3.3,16 if len(chunk)>600 else 20,'202126')
+            elif layout=='example':
+                card(.6,2.8,12,3.85,'24242D')
+                box(chunk,.9,3.05,11.4,3.3,16 if len(chunk)>600 else 20,'FFFFFF')
+            elif layout=='summary':
+                card(.6,2.8,12,3.85,'EAF5DE')
+                box(chunk,.9,3.05,11.4,3.3,16 if len(chunk)>600 else 20,'202126')
+            else:
+                box(chunk,.6,2.8,10.7,3.85,16 if len(chunk)>600 else 20,'202126')
+                card(12,2.8,.3,3.7,'C5F779')
             box(str(len(deck.slides)), 12, 7, .7, .3, 11, "727780")
             slide.notes_slide.notes_text_frame.text = str(content.get("notes", ""))
     output = BytesIO()

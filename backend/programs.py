@@ -477,11 +477,14 @@ class Programs:
                 await self.save(p)
                 await self.event(p, "skeleton_approved", p["approval"])
                 return p
-            if action in ("generate", "revise_module"):
+            if action in ("generate", "generate_module", "revise_module"):
                 await self.approved(p)
                 ensure(not p["demo"], "Демо не вызывает модель")
                 ensure(self.allow_unconfigured or (await self.models.status(owner,self.provider_status()))["configured"], "Провайдер модели не настроен", 503)
-                target = next((m for m in p["skeleton"]["modules"] if m["id"] == body.get("moduleId")), None) if action == "revise_module" else None
+                target = next((m for m in p["skeleton"]["modules"] if m["id"] == body.get("moduleId")), None) if action in ("generate_module", "revise_module") else None
+                if action == "generate_module":
+                    ensure(target, "Модуль не найден", 404)
+                    ensure(target["id"] not in p["materials"], "Модуль уже готов. Используйте доработку модуля", 409)
                 if action == "revise_module":
                     ensure(target and target["id"] in p["materials"], "Модуль не найден или ещё не создан")
                     required(body.get("instruction"), 6000)
@@ -771,7 +774,8 @@ class Programs:
                 async with semaphore:
                     source['accessCheck']=await probe_source(source)
             await asyncio.gather(*(check(source) for source in p['sources']))
-        p["state"] = "draft_ready" if (await self.rules.call("inspectProgram", p))["passed"] else "needs_revision"
+        complete = all(m['id'] in p['materials'] for m in p['skeleton']['modules']) and bool(p.get('sections')) and bool(p.get('finalAssessment'))
+        p['state'] = 'materials_partial' if target and not complete else ('draft_ready' if (await self.rules.call('inspectProgram', p))['passed'] else 'needs_revision')
         await self.save(p)
 
     async def generate_lessons(self,p,module,quota,quotas=None,instruction=None):

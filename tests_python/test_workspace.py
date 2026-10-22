@@ -44,6 +44,8 @@ def test_two_party_publication_immutable_lessons_and_learning(client):
     owner_cookie=client.cookies.get('session')
     expert,_=reg(client,'expert');expert_cookie=client.cookies.get('session')
     assert a(client,'get',id=p['id']).status_code==403
+    assert client.get('/api/usage').status_code==403
+    assert call(client,'learning').status_code==403
     client.cookies.set('session',owner_cookie)
     assert call(client,'request_review',id=p['id'],expert=expert['id']).status_code==200
     review=call(client,'review',id=p['id']).json()
@@ -72,6 +74,7 @@ def test_two_party_publication_immutable_lessons_and_learning(client):
     learner,learner_login=reg(client,'learner')
     assert a(client,'create',request='Hidden').status_code==403
     assert call(client,'review',id=p['id']).status_code==404
+    assert client.get('/api/usage').status_code==403
     assert call(client,'enroll',id=release).status_code==200
     enrolled=call(client,'learning').json()[0]
     units=lessons(p)
@@ -86,6 +89,13 @@ def test_two_party_publication_immutable_lessons_and_learning(client):
     assert call(client,'rate',id=release,rating=5,comment='Понятный материал').status_code==200
     assert call(client,'create_group',title='No').status_code==403
     learner_cookie=client.cookies.get('session')
+    client.cookies.set('session',owner_cookie)
+    own_stats=call(client,'course_statistics').json()
+    assert len(own_stats)==1 and own_stats[0]['completed']==1
+    assert own_stats[0]['enrollment_type']=='self' and own_stats[0]['group_title'] is None
+    client.cookies.set('session',expert_cookie)
+    assert call(client,'enroll',id=release).status_code==403
+    assert call(client,'course_statistics').status_code==403
     client.cookies.set('session',owner_cookie)
     group=call(client,'create_group',title='Первая группа').json()['id']
     assert call(client,'add_member',groupId=group,login=learner_login).status_code==200
@@ -306,3 +316,35 @@ def test_truncated_combined_outline_falls_back_to_intake(postgres_url):
         assert result['state']=='ready_for_skeleton'
         assert len(calls)==2
         assert all('Навык 2' not in skill for skill in calls)  # Intake stays compact on both attempts
+
+
+def test_review_waits_for_complete_course_and_module_generation_is_scoped(client,monkeypatch):
+    owner,_=reg(client,'methodist');owner_cookie=client.cookies.get('session')
+    expert,_=reg(client,'expert');expert_cookie=client.cookies.get('session');client.cookies.set('session',owner_cookie)
+    p=a(client,'demo').json();p['demo']=False;p['materials']={};p['sections']={};p['finalAssessment']=None
+    from psycopg.types.json import Jsonb
+    client.app.state.db.execute('UPDATE program_projects SET document=%s WHERE id=%s',(Jsonb(p),p['id']))
+    assert a(client,'approve',id=p['id'],confirm=True,expectedRevision=p['revision']).status_code==200
+    result=call(client,'request_review',id=p['id'],expert=expert['id'])
+    assert result.status_code==409 and 'завершите' in result.text
+    assert not client.app.state.db.one('SELECT 1 FROM program_reviews WHERE project_id=%s',(p['id'],))
+    # Old pending reviews cannot expose an unfinished revision to the expert.
+    client.app.state.db.execute('INSERT INTO program_reviews(project_id,expert,digest) VALUES(%s,%s,%s)',(p['id'],expert['id'],'old-digest'))
+    client.cookies.set('session',expert_cookie)
+    assert call(client,'review',id=p['id']).status_code==409
+    assert call(client,'comment',id=p['id'],message='Premature comment').status_code==409
+    client.cookies.set('session',owner_cookie)
+    targets=[]
+    async def generate(current,target=None,instruction=None):
+        targets.append(target['id']);current['state']='approved'
+    monkeypatch.setattr(client.app.state.programs,'generate',generate)
+    mid=p['skeleton']['modules'][0]['id']
+    assert a(client,'generate_module',id=p['id'],moduleId='missing').status_code==404
+    assert a(client,'generate_module',id=p['id'],moduleId=mid).status_code==200
+    deadline=time.monotonic()+5
+    while time.monotonic()<deadline:
+        current=a(client,'get',id=p['id']).json()
+        if current['job']['state']!='running':break
+        time.sleep(.02)
+    assert targets==[mid]
+    assert current['materials']=={} and current['sections']=={}

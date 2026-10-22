@@ -137,7 +137,9 @@ def build(p):
     heading('Приложение 2 Руководства самостоятельного изучения и слайды' if s.get('selfStudyOnly') else 'Приложение 2 Планы лекций')
     for m in p['materials'].values():
         for lecture in m['lectures']:
-            heading(lecture['title'],2);para(lecture['plan']);para(lecture.get('content',''))
+            heading(lecture['title'],2);para(lecture['plan'])
+            from .learning_content import add_docx
+            add_docx(doc,lecture.get('content',''))
             for i,slide in enumerate(lecture['slides'],1):
                 heading('Слайд '+str(i)+' '+slide['title'],3);para(slide['text']);para('Заметки преподавателя: '+slide['notes'])
     heading('Приложение 3 Источники и отчёт проверки')

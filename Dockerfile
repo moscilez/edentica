@@ -5,7 +5,7 @@ COPY requirements.txt requirements-lock.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -c requirements-lock.txt
 RUN groupadd --gid 10001 edentica && useradd --uid 10001 --gid edentica --create-home edentica
 COPY --chown=edentica:edentica backend ./backend
-COPY --chown=edentica:edentica public/program-studio.html public/program-studio.js public/program-studio.css public/program-editor.js public/workspace.js public/usage.js public/workspace.css public/brand.png public/brand.svg public/favicon.png public/favicon.svg public/favicon.ico ./public/
+COPY --chown=edentica:edentica public/program-studio.html public/program-studio.js public/program-studio.css public/program-editor.js public/workspace.js public/usage.js public/workspace.css public/learning-content.js public/brand.png public/brand.svg public/favicon.png public/favicon.svg public/favicon.ico ./public/
 COPY --chown=edentica:edentica scripts/extract-material.py ./scripts/
 COPY --chown=edentica:edentica templates ./templates
 RUN mkdir -p /app/data /app/output && chown -R edentica:edentica /app/data /app/output

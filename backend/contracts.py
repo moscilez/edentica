@@ -105,6 +105,7 @@ class Seminar(LinkedMaterial):
 
 
 class Slide(BaseModel):
+    layout:Literal['concept','steps','comparison','example','summary']='concept'
     title:str=Field(min_length=1,max_length=180)
     text:str=Field(min_length=1,max_length=650)
     notes:str=Field(min_length=1,max_length=10000)

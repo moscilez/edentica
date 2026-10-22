@@ -83,7 +83,19 @@ def test_single_entry_end_to_end_human_gate_and_all_exports(postgres_url,monkeyp
   before=len(calls);post(action='workflow',id=p['id']);assert len(calls)==before
   assert c.post('/api/programs',headers=H,json={'action':'generate','id':p['id']}).status_code==422
   post(action='approve',id=p['id'],expectedRevision=p['revision'],confirm=True)
+  if not resume_after_failure:
+   first=p['skeleton']['modules'][0]['id']
+   post(action='generate_module',id=p['id'],moduleId=first);p=wait(p['id'])
+   assert p['job']['state']=='completed',p['job']
+   assert set(p['materials'])=={first} and not p['sections']
+   assert p['state']=='materials_partial'
+   original_module=copy.deepcopy(p['materials'][first])
+   lecture_id=first+':0'
+   for format in ('docx','pdf','pptx','slides-pdf'):
+    r=c.post('/api/lesson-export',headers=H,json={'id':p['id'],'lessonId':lecture_id,'format':format})
+    assert r.status_code==200,r.text[:300]
   post(action='workflow',id=p['id']);p=wait(p['id'])
+  if not resume_after_failure:assert p['materials'][first]==original_module
   if resume_after_failure:
    assert p['job']['state']=='failed'
    assert next(iter(next(iter(p['lessonDrafts'].values())).values()))['lectures']

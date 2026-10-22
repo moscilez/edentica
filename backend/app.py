@@ -199,6 +199,7 @@ def create_app(database_url=None, complete=None):
     @app.get('/api/usage')
     async def usage(request: Request):
         account=await user(request)
+        ensure(account['role']=='methodist','Расход токенов доступен методисту',403)
         try:days=int(request.query_params.get('days','30'))
         except ValueError:raise HTTPException(422,'Период должен быть числом дней') from None
         ensure(1<=days<=366,'Период: от 1 до 366 дней')
@@ -361,7 +362,7 @@ def create_app(database_url=None, complete=None):
     @app.get("/{asset}")
     async def assets(asset: str):
         allowed = {"brand.svg", "brand.png", "favicon.svg", "favicon.png", "favicon.ico",
-                   "program-studio.js", "program-studio.css", "program-editor.js", "workspace.js", "usage.js", "workspace.css"}
+                   "program-studio.js", "program-studio.css", "program-editor.js", "workspace.js", "usage.js", "workspace.css", "learning-content.js"}
         ensure(asset in allowed, "Не найдено", 404)
         return FileResponse(ROOT / "public" / asset)
 
