@@ -1,6 +1,6 @@
 """Provider-enforced output shapes; business invariants stay in Python checks."""
 import copy
-from .contracts import Intake,Outline,Competency,Lecture,LessonAssessment,Seminar,TestQuestion,Interview,FinalAssessment
+from .contracts import Intake,Outline,Competency,Lecture,GeneratedLecture,LessonAssessment,Seminar,TestQuestion,Interview,FinalAssessment
 
 def obj(properties):return {'type':'object','properties':properties,'required':list(properties),'additionalProperties':False}
 def array(items,minimum=0,maximum=150):return {'type':'array','items':items,'minItems':minimum,'maxItems':maximum}
@@ -43,7 +43,7 @@ def schema_for(skill,payload):
         competency['properties']['standard']={'type':'null'}
         schema=obj({'competencies':array(competency,len(payload['missingIds']),len(payload['missingIds']))})
         schema['$defs']=defs
-    elif skill=='lesson':schema=shape(Lecture)
+    elif skill=='lesson':schema=shape(GeneratedLecture)
     elif skill=='assessment':schema=shape(LessonAssessment)
     elif skill in ('assignment','questions','interview'):
         key,contract={'assignment':('seminars',Seminar),'questions':('questions',TestQuestion),'interview':('interviews',Interview)}[skill]

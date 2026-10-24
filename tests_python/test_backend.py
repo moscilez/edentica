@@ -1,3 +1,4 @@
+from tests_python.lesson_samples import educational_text
 import asyncio
 import base64
 import copy
@@ -149,6 +150,9 @@ def test_real_orchestration_with_mock_provider(postgres_url,monkeypatch):
     sections = asyncio.run(rules.call("config"))["templateSections"]
     async def probe(source):return {'access':'reachable','status':'unverified'}
     monkeypatch.setattr('backend.programs.probe_source',probe)
+    # Reuse the three fixture texts; separate quality tests cover duplicate detection.
+    from backend.learning_content import lecture_issues as check_lecture
+    monkeypatch.setattr('backend.programs.lecture_issues',lambda lesson,previous=():check_lecture(lesson))
     calls = []
     async def complete(skill, payload):
         calls.append(skill)
@@ -163,8 +167,8 @@ def test_real_orchestration_with_mock_provider(postgres_url,monkeypatch):
             original=next(iter(fixture['materials'].values()))
             if 'JSON-объект лекции' in skill:
                 value=copy.deepcopy(original['lectures'][0])
-                value.update(topicId=topic['id'],competencyIds=topic['competencyIds'])
-                if payload.get('instruction'):value['title']='Точечно обновлённое содержание'
+                value.update(title=payload.get('lesson',{}).get('title',topic['title']),topicId=topic['id'],competencyIds=topic['competencyIds'],content=educational_text(topic))
+                if payload.get('instruction'):value['title']='Точечно обновлённое содержание '+payload.get('lesson',{}).get('id','')
             else:
                 value={}
                 for kind in ('questions','seminars'):
@@ -196,7 +200,7 @@ def test_real_orchestration_with_mock_provider(postgres_url,monkeypatch):
         agent(client, "revise_module", id=id, moduleId="M1", instruction="Обновите пояснение")
         p = wait(client, id)
         assert p["materials"]["M2"] == untouched
-        assert p["materials"]["M1"]["summary"].strip() == "Точечно обновлённое содержание"
+        assert p["materials"]["M1"]["summary"].strip().startswith("Точечно обновлённое содержание")
         assert p["history"][-1]["materials"]["M1"]["summary"] != p["materials"]["M1"]["summary"]
         assert agent(client, "export", id=id, format="gift").status_code == 200
         source = p["sources"][0]
@@ -307,7 +311,7 @@ def test_cloudru_http_contract_without_real_calls(monkeypatch):
     from types import SimpleNamespace
     from backend import cloudru
     monkeypatch.setenv("CLOUDRU_API_KEY", "test-key-only")
-    monkeypatch.setenv("CLOUDRU_MODEL", "test-model-only")
+    monkeypatch.setenv("CLOUDRU_MODEL", "GigaChat/test-model-only")
     replies = [
         {"choices": [{"message": {"content": '```json\n{"ok":true}\n```'}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 20, "completion_tokens": 8}},
         {"choices": [{"message": {"content": "{}"}, "finish_reason": "length"}]},
@@ -316,7 +320,7 @@ def test_cloudru_http_contract_without_real_calls(monkeypatch):
     async def handle(method,url,**kwargs):
         assert url == "https://foundation-models.api.cloud.ru/v1/chat/completions"
         assert kwargs['headers']["Authorization"] == "Bearer test-key-only"
-        assert kwargs['payload']["model"] == "test-model-only"
+        assert kwargs['payload']["model"] == "GigaChat/test-model-only"
         return 200,{},json.dumps(replies.pop(0)).encode()
     monkeypatch.setattr('backend.models.public_request',handle)
     result = asyncio.run(cloudru.complete("test instruction", {"request": "test"}))

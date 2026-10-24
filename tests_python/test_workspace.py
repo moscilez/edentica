@@ -1,3 +1,4 @@
+from tests_python.lesson_samples import educational_text
 import asyncio
 import copy
 import time
@@ -35,7 +36,7 @@ def test_two_party_publication_immutable_lessons_and_learning(client):
     p['demo']=False
     for module in p['materials'].values():
         for lecture in module['lectures']:
-            lecture['content']='Полный учебный материал для тестового сценария. '+('Объяснение понятия, практический пример и проверка понимания. '*8)
+            lecture['content']=educational_text({'id':lecture['topicId']})
     from psycopg.types.json import Jsonb
     client.app.state.db.execute('UPDATE program_projects SET document=%s WHERE id=%s',(Jsonb(p),p['id']))
     assert a(client,'approve',id=p['id'],confirm=True,expectedRevision=p['revision']).status_code==200
@@ -44,6 +45,8 @@ def test_two_party_publication_immutable_lessons_and_learning(client):
     owner_cookie=client.cookies.get('session')
     expert,_=reg(client,'expert');expert_cookie=client.cookies.get('session')
     assert a(client,'get',id=p['id']).status_code==403
+    assert client.get('/api/usage').status_code==403
+    assert call(client,'learning').status_code==403
     client.cookies.set('session',owner_cookie)
     assert call(client,'request_review',id=p['id'],expert=expert['id']).status_code==200
     review=call(client,'review',id=p['id']).json()
@@ -72,6 +75,7 @@ def test_two_party_publication_immutable_lessons_and_learning(client):
     learner,learner_login=reg(client,'learner')
     assert a(client,'create',request='Hidden').status_code==403
     assert call(client,'review',id=p['id']).status_code==404
+    assert client.get('/api/usage').status_code==403
     assert call(client,'enroll',id=release).status_code==200
     enrolled=call(client,'learning').json()[0]
     units=lessons(p)
@@ -86,6 +90,13 @@ def test_two_party_publication_immutable_lessons_and_learning(client):
     assert call(client,'rate',id=release,rating=5,comment='Понятный материал').status_code==200
     assert call(client,'create_group',title='No').status_code==403
     learner_cookie=client.cookies.get('session')
+    client.cookies.set('session',owner_cookie)
+    own_stats=call(client,'course_statistics').json()
+    assert len(own_stats)==1 and own_stats[0]['completed']==1
+    assert own_stats[0]['enrollment_type']=='self' and own_stats[0]['group_title'] is None
+    client.cookies.set('session',expert_cookie)
+    assert call(client,'enroll',id=release).status_code==403
+    assert call(client,'course_statistics').status_code==403
     client.cookies.set('session',owner_cookie)
     group=call(client,'create_group',title='Первая группа').json()['id']
     assert call(client,'add_member',groupId=group,login=learner_login).status_code==200
@@ -103,23 +114,16 @@ def test_two_party_publication_immutable_lessons_and_learning(client):
     assert call(client,'course',id=release).status_code==200
 
 
-def test_encrypted_models_are_per_user_and_profile_role_cannot_be_escalated(client,monkeypatch):
-    monkeypatch.setenv('APP_ENCRYPTION_KEY',Fernet.generate_key().decode())
+def test_personal_model_routes_removed_and_profile_role_cannot_be_escalated(client):
     owner,_=reg(client,'methodist')
-    fake='non-live-unit-test-secret'
-    r=client.post('/api/connections',headers=H,json={'action':'save','name':'test','baseUrl':'https://example.com/v1','model':'unit','apiKey':fake})
-    assert r.status_code==200,r.text
-    assert fake not in r.text and 'encrypted_key' not in r.text
-    saved=r.json()[0]['id']
-    row=client.app.state.db.one('SELECT encrypted_key FROM model_connections WHERE id=%s',(saved,))
-    assert fake not in row['encrypted_key']
-    other,_=reg(client,'methodist')
-    assert client.post('/api/connections',headers=H,json={}).json()==[]
-    assert client.post('/api/connections',headers=H,json={'action':'select','id':saved}).status_code==404
+    for action in ('save','select','remove'):
+        assert client.post('/api/connections',headers=H,json={'action':action}).status_code==410
+    client.app.state.db.execute("INSERT INTO model_connections(id,user_id,name,base_url,model,encrypted_key) VALUES(%s,%s,'legacy','https://api.openai.com/v1','gpt-4','invalid-key')",(str(uuid4()),owner['id']))
+    assert asyncio.run(client.app.state.models.selected(owner['id'])) is None
+    status=client.get('/api/agent').json()
+    assert not status.get('personal') and not status.get('connectionId')
     r=client.post('/api/profile',headers=H,json={'name':'Изменённое ФИО','login':'new-'+uuid4().hex,'role':'expert'})
     assert r.status_code==200 and r.json()['role']=='methodist'
-    reg(client,'learner')
-    assert client.post('/api/connections',headers=H,json={}).status_code==403
 
 
 @pytest.mark.parametrize('url',['http://example.com','https://localhost/v1','https://a.local/v1','https://name:secret@example.com','https://example.com:9000/v1'])
@@ -146,7 +150,8 @@ def test_lesson_exports_are_portable_and_reimportable():
     assert lesson['title'] in '\n'.join(x.text for x in Document(BytesIO(docx.body)).paragraphs)
     assert len(Presentation(BytesIO(export_lesson(p,lesson['id'],'pptx').body)).slides)>1
     assert len(PdfReader(BytesIO(export_lesson(p,lesson['id'],'pdf').body)).pages)>0
-    assert len(PdfReader(BytesIO(export_lesson(p,lesson['id'],'slides-pdf').body)).pages)==len(lesson['slides'])
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException):export_lesson(p,lesson['id'],'slides-pdf')
 
 
 def test_public_http_startup_is_rejected_before_database_access(monkeypatch):
@@ -306,3 +311,35 @@ def test_truncated_combined_outline_falls_back_to_intake(postgres_url):
         assert result['state']=='ready_for_skeleton'
         assert len(calls)==2
         assert all('Навык 2' not in skill for skill in calls)  # Intake stays compact on both attempts
+
+
+def test_review_waits_for_complete_course_and_module_generation_is_scoped(client,monkeypatch):
+    owner,_=reg(client,'methodist');owner_cookie=client.cookies.get('session')
+    expert,_=reg(client,'expert');expert_cookie=client.cookies.get('session');client.cookies.set('session',owner_cookie)
+    p=a(client,'demo').json();p['demo']=False;p['materials']={};p['sections']={};p['finalAssessment']=None
+    from psycopg.types.json import Jsonb
+    client.app.state.db.execute('UPDATE program_projects SET document=%s WHERE id=%s',(Jsonb(p),p['id']))
+    assert a(client,'approve',id=p['id'],confirm=True,expectedRevision=p['revision']).status_code==200
+    result=call(client,'request_review',id=p['id'],expert=expert['id'])
+    assert result.status_code==409 and 'завершите' in result.text
+    assert not client.app.state.db.one('SELECT 1 FROM program_reviews WHERE project_id=%s',(p['id'],))
+    # Old pending reviews cannot expose an unfinished revision to the expert.
+    client.app.state.db.execute('INSERT INTO program_reviews(project_id,expert,digest) VALUES(%s,%s,%s)',(p['id'],expert['id'],'old-digest'))
+    client.cookies.set('session',expert_cookie)
+    assert call(client,'review',id=p['id']).status_code==409
+    assert call(client,'comment',id=p['id'],message='Premature comment').status_code==409
+    client.cookies.set('session',owner_cookie)
+    targets=[]
+    async def generate(current,target=None,instruction=None):
+        targets.append(target['id']);current['state']='approved'
+    monkeypatch.setattr(client.app.state.programs,'generate',generate)
+    mid=p['skeleton']['modules'][0]['id']
+    assert a(client,'generate_module',id=p['id'],moduleId='missing').status_code==404
+    assert a(client,'generate_module',id=p['id'],moduleId=mid).status_code==200
+    deadline=time.monotonic()+5
+    while time.monotonic()<deadline:
+        current=a(client,'get',id=p['id']).json()
+        if current['job']['state']!='running':break
+        time.sleep(.02)
+    assert targets==[mid]
+    assert current['materials']=={} and current['sections']=={}

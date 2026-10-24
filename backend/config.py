@@ -24,10 +24,9 @@ class Settings:
         return cls(os.getenv('EDENTICA_MODE','hackathon'),os.getenv('LLM_PROVIDER','cloudru'),base.rstrip('/'),key,model,os.getenv('LLM_STRUCTURED_OUTPUT','1')!='0')
 
     def validate_endpoint(self,base,model=''):
-        if self.mode!='hackathon':return
         u=urlsplit(base)
         if u.scheme!='https' or u.port not in (None,443) or u.username or u.password or u.query or u.fragment or (u.hostname,u.path.rstrip('/')) not in APPROVED_ENDPOINTS:
-            raise ValueError('В режиме хакатона доступны только Cloud.ru Evolution и выданный шлюз GIGASCHOOL. Другие API разрешаются только в локальном режиме.')
+            raise ValueError('Доступны только Cloud.ru Evolution и выданный шлюз GIGASCHOOL. Другие API не поддерживаются платформой.')
         if any(x in model.lower() for x in ('gpt-','claude','gemini','openai/','anthropic/','google/')):
             raise ValueError('Эта модель запрещена ограничениями кейса')
         if model and not model.lower().startswith(APPROVED_MODEL_PREFIXES):
@@ -36,7 +35,6 @@ class Settings:
     def validate(self):
         if os.getenv('LLM_STRUCTURED_OUTPUT','1') not in ('0','1'):raise ValueError('LLM_STRUCTURED_OUTPUT: 0 или 1')
         if self.mode not in ('local','hackathon'):raise ValueError('EDENTICA_MODE: local или hackathon')
-        if self.provider not in ('cloudru','codex'):raise ValueError('LLM_PROVIDER: cloudru или codex')
-        if self.provider=='codex' and self.mode!='local':raise ValueError('Codex разрешён только в локальном режиме разработки')
+        if self.provider!='cloudru':raise ValueError('Доступна только серверная модель Cloud.ru: LLM_PROVIDER=cloudru')
         self.validate_endpoint(self.base_url,self.model)
         return self

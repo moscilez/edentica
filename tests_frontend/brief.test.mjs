@@ -9,7 +9,7 @@ const source=fs.readFileSync(new URL('../public/program-studio.js',import.meta.u
 const handlers=source.slice(source.indexOf('async function newProgram('),source.indexOf('function skillPage('));
 async function setup({similar=[],references=[]}={}){
  const form={dataset:{},values:{request:'Курс Python на 16 часов',visibility:'private'}};
- const button={disabled:false},input={disabled:false,value:'file.txt',files:[]};
+ const button={disabled:false},input={disabled:false,dataset:{},value:'file.txt',files:[]};
  let checked=references.map(x=>x.id),rows=references.map(x=>({...x})),html='';
  const refs={querySelectorAll:()=>checked.map(value=>({value})),get innerHTML(){return html},set innerHTML(value){html=value;checked=[...value.matchAll(/value="([^"]+)" checked/g)].map(m=>m[1])}};
  const elements={'#brief':form,'#brief-submit':button,'#reference-file':input,'#references':refs};

@@ -127,3 +127,19 @@ def test_api_output_has_no_platform_token_cap_and_failed_usage_survives(monkeypa
     assert not any(k in sent[0] for k in ('max_tokens','max_completion_tokens','max_output_tokens'))
     assert error.value.model_result['usage']=={'inputTokens':123,'outputTokens':456}
     assert error.value.model_result['usageReported'] is True
+
+
+def test_ruble_tariff_is_model_specific_and_owner_scoped(client):
+    from backend.usage import cost
+    assert cost(1_000_000,1_000_000)=={'inputRubles':73.03,'outputRubles':176.39,'totalRubles':249.42}
+    assert cost(1_000_000,2_000_000)['totalRubles']==425.81
+    owner=register(client)
+    for model,incoming,outgoing in [('GigaChat/GigaChat-3-Pro',1_000_000,1_000_000),('legacy-test-model',100,200)]:
+        client.app.state.db.execute("INSERT INTO llm_usage_events(id,owner,project_id,provider,model,skill,input_tokens,output_tokens,usage_known,status) VALUES(%s,%s,'pricing-test','Cloud.ru',%s,'lesson',%s,%s,true,'completed')",(str(uuid4()),owner['id'],model,incoming,outgoing))
+    stats=client.get('/api/usage?days=7&timezone=Europe/Moscow').json()
+    assert stats['pricing']['period']['totalRubles']==249.42
+    assert stats['pricing']['allTime']['inputRubles']==73.03
+    assert stats['pricing']['unpricedPeriodTokens']==300
+    assert sum(d['cost']['totalRubles'] for d in stats['days'])==249.42
+    register(client)
+    assert client.get('/api/usage').json()['pricing']['allTime']['totalRubles']==0

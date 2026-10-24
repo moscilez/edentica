@@ -21,7 +21,7 @@ def lessons(snapshot):
     for mid, module in snapshot.get("materials", {}).items():
         for i, lecture in enumerate(module.get("lectures", [])):
             topic = lecture.get("topicId")
-            questions = [q for q in module.get("questions", []) if q.get("topicId") == topic] if topic else (module.get("questions", []) if i == len(module["lectures"]) - 1 else [])
+            questions = [q for q in module.get("questions", []) if (q.get('lessonId')==lecture['lessonId'] if lecture.get('lessonId') and q.get('lessonId') else q.get("topicId") == topic)] if topic else (module.get("questions", []) if i == len(module["lectures"]) - 1 else [])
             result.append({"id": f"{mid}:{i}", "moduleId": mid, "title": lecture["title"],
                            "text": lecture.get("content") or lecture.get("plan", ""),
                            "slides": lecture.get("slides", []), "questions": questions})
@@ -33,11 +33,14 @@ def learner_lesson(lesson):
 
 
 def learning_issues(program):
+    from .learning_content import lecture_issues
     issues=[]
+    previous=[]
     for mid,module in program.get('materials',{}).items():
         for index,lecture in enumerate(module.get('lectures',[])):
-            if not isinstance(lecture.get('content'),str) or len(lecture['content'].strip())<200:
-                issues.append(f"{mid}, урок {index+1}: нужен учебный текст (от 200 символов), одного плана лекции недостаточно")
+            for message in lecture_issues(lecture,previous):
+                issues.append(f"{mid}, урок {index+1}: {message}")
+            previous.append(lecture)
     return issues
 
 
@@ -65,10 +68,16 @@ class Platform:
     async def review_access(self, id, user):
         row = await self.query("one", "SELECT p.document,r.expert,r.status,r.digest FROM program_projects p LEFT JOIN program_reviews r ON r.project_id=p.id WHERE p.id=%s", (id,))
         ensure(row and user["id"] in (row["document"]["owner"], row["expert"]), "Программа не найдена", 404)
+        if user['role']=='expert':
+            report=await self.programs.rules.call('inspectProgram',row['document'])
+            ensure(report['passed'] and not learning_issues(row['document']),
+                   'Методист ещё готовит материалы. Проверка будет доступна после завершения курса.',409)
         return row
 
     async def action(self, action, data, user):
         uid = user["id"]
+        if action in ('enroll','learning','lesson','complete_lesson','rate'):
+            ensure(user['role'] != 'expert', 'Эксперт просматривает каталог и проверяет программы; обучение недоступно', 403)
         if action == "catalog":
             query = str(data.get("query", ""))[:200]
             return await self.query("all", """SELECT p.id,p.title,p.description,p.created,p.owner,u.name AS author,e.name AS expert,
@@ -128,6 +137,9 @@ class Platform:
                 digest = content_digest(p)
                 if action == "request_review":
                     await self.programs.approved(p)
+                    report = await self.programs.rules.call('inspectProgram', p)
+                    ensure(report['passed'] and not learning_issues(p),
+                           'Сначала завершите все модули, итоговую аттестацию и автопроверку. Затем отправьте готовый курс эксперту.', 409)
                     expert = required(data.get("expert"), 80)
                     ensure(expert != uid and await self.query("one", "SELECT 1 FROM users WHERE id=%s AND role='expert'", (expert,)), "Выберите другого пользователя с ролью эксперт")
                     await self.query("execute", "INSERT INTO program_reviews(project_id,expert,digest) VALUES(%s,%s,%s) ON CONFLICT(project_id) DO UPDATE SET expert=excluded.expert,digest=excluded.digest,status='pending',reviewed_at=NULL", (id, expert,digest))
@@ -248,6 +260,21 @@ class Platform:
                 (SELECT max(updated) FROM lesson_progress WHERE enrollment_id=e.id) AS last_activity
                 FROM group_members m JOIN users u ON u.id=m.user_id LEFT JOIN enrollments e ON e.user_id=u.id AND e.group_id=m.group_id
                 LEFT JOIN publications p ON p.id=e.publication_id WHERE m.group_id=%s ORDER BY u.name""",(group,))
+        if action == 'course_statistics':
+            self.methodist(user)
+            publication = data.get('publicationId')
+            if publication:
+                ensure(await self.query('one', 'SELECT 1 FROM publications WHERE id=%s AND owner=%s', (required(publication,80),uid)), 'Курс не найден',404)
+            return await self.query('all', """SELECT u.name,u.login,e.id,e.publication_id,p.title,e.created,e.deadline,e.required,
+                CASE WHEN e.assigned_by IS NULL THEN 'self' ELSE 'assigned' END AS enrollment_type,
+                g.title AS group_title,
+                (SELECT COALESCE(sum(jsonb_array_length(x.value->'lectures')),0) FROM jsonb_each(p.snapshot->'materials') x) AS total_lessons,
+                (SELECT count(*) FROM lesson_progress WHERE enrollment_id=e.id AND completed) AS completed,
+                (SELECT avg(score)::float FROM lesson_progress WHERE enrollment_id=e.id AND score IS NOT NULL) AS score,
+                (SELECT max(updated) FROM lesson_progress WHERE enrollment_id=e.id) AS last_activity
+                FROM enrollments e JOIN publications p ON p.id=e.publication_id JOIN users u ON u.id=e.user_id
+                LEFT JOIN study_groups g ON g.id=e.group_id
+                WHERE p.owner=%s AND (%s::text IS NULL OR p.id=%s) ORDER BY p.title,u.name""", (uid,publication,publication))
         if action == "my_releases":
             return await self.query("all", "SELECT id,title,visibility,created FROM publications WHERE owner=%s ORDER BY created DESC", (uid,))
         ensure(False,"Неизвестное действие",404)

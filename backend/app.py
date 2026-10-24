@@ -199,6 +199,7 @@ def create_app(database_url=None, complete=None):
     @app.get('/api/usage')
     async def usage(request: Request):
         account=await user(request)
+        ensure(account['role']=='methodist','Расход токенов доступен методисту',403)
         try:days=int(request.query_params.get('days','30'))
         except ValueError:raise HTTPException(422,'Период должен быть числом дней') from None
         ensure(1<=days<=366,'Период: от 1 до 366 дней')
@@ -235,25 +236,6 @@ def create_app(database_url=None, complete=None):
         except IntegrityError:
             raise HTTPException(409,"Логин занят") from None
         return {**account,"name":name,"login":login}
-
-    @app.post("/api/connections")
-    async def connections(request: Request):
-        account = await user(request)
-        ensure(account["role"] == "methodist", "Настройки ИИ доступны методисту",403)
-        data = await body(request)
-        if data.get("action") == "save":
-            return await app.state.models.save(account["id"],data)
-        if data.get("action") == "remove":
-            return await app.state.models.remove(account["id"],required(data.get("id"),80))
-        if data.get("action") == "select":
-            id = data.get("id")
-            def select():
-                with app.state.db.pool.connection() as c:
-                    c.execute("SELECT id FROM users WHERE id=%s FOR UPDATE",(account["id"],))
-                    ensure(not id or c.execute("SELECT 1 FROM model_connections WHERE id=%s AND user_id=%s",(id,account["id"])).fetchone(),"Подключение не найдено",404)
-                    c.execute("UPDATE model_connections SET enabled=(id=%s) WHERE user_id=%s",(id or "",account["id"]))
-            await asyncio.to_thread(select)
-        return await app.state.models.list(account["id"])
 
     @app.post("/api/platform")
     async def platform(request: Request):
@@ -361,7 +343,7 @@ def create_app(database_url=None, complete=None):
     @app.get("/{asset}")
     async def assets(asset: str):
         allowed = {"brand.svg", "brand.png", "favicon.svg", "favicon.png", "favicon.ico",
-                   "program-studio.js", "program-studio.css", "program-editor.js", "workspace.js", "usage.js", "workspace.css"}
+                   "program-studio.js", "program-studio.css", "program-editor.js", "workspace.js", "usage.js", "workspace.css", "learning-content.js"}
         ensure(asset in allowed, "Не найдено", 404)
         return FileResponse(ROOT / "public" / asset)
 

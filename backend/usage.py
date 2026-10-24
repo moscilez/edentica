@@ -1,5 +1,16 @@
 """Durable per-account model usage. No prompts, keys or response content are stored."""
 from uuid import uuid4
+from decimal import Decimal
+
+PRICED_MODELS=('gigachat/gigachat-3-pro','gigachat-3-pro')
+INPUT_RATE=Decimal('73.03')
+OUTPUT_RATE=Decimal('176.39')
+
+def cost(incoming,outgoing):
+    a=Decimal(int(incoming))*INPUT_RATE/1_000_000
+    b=Decimal(int(outgoing))*OUTPUT_RATE/1_000_000
+    return {'inputRubles':float(a.quantize(Decimal('0.000001'))),'outputRubles':float(b.quantize(Decimal('0.000001'))),'totalRubles':float((a+b).quantize(Decimal('0.000001')))}
+
 
 
 def tokens(value):
@@ -37,6 +48,8 @@ async def summary(db, owner, days, timezone):
     ), daily AS (
         SELECT (created AT TIME ZONE %s)::date AS day,
             sum(input_tokens)::bigint AS input_tokens,sum(output_tokens)::bigint AS output_tokens,
+            sum(CASE WHEN lower(model) IN ('gigachat/gigachat-3-pro','gigachat-3-pro') THEN input_tokens ELSE 0 END)::bigint AS priced_input,
+            sum(CASE WHEN lower(model) IN ('gigachat/gigachat-3-pro','gigachat-3-pro') THEN output_tokens ELSE 0 END)::bigint AS priced_output,
             count(*)::int AS calls,count(*) FILTER(WHERE NOT usage_known)::int AS unknown_calls,
             count(*) FILTER(WHERE status='failed')::int AS failed_calls
         FROM llm_usage_events,bounds WHERE owner=%s
@@ -45,7 +58,7 @@ async def summary(db, owner, days, timezone):
     ) SELECT to_char(d.day,'YYYY-MM-DD') AS date,
         coalesce(s.input_tokens,0) AS "inputTokens",coalesce(s.output_tokens,0) AS "outputTokens",
         coalesce(s.calls,0) AS calls,coalesce(s.unknown_calls,0) AS "unknownCalls",
-        coalesce(s.failed_calls,0) AS "failedCalls"
+        coalesce(s.failed_calls,0) AS "failedCalls",coalesce(s.priced_input,0) AS priced_input,coalesce(s.priced_output,0) AS priced_output
     FROM bounds,generate_series(today-(%s-1),today,'1 day') AS d(day)
     LEFT JOIN daily s ON s.day=d.day::date ORDER BY d.day''',(timezone,timezone,owner,days,timezone,days))
     total=await db('one','''SELECT coalesce(sum(input_tokens),0)::bigint AS "inputTokens",
@@ -54,4 +67,14 @@ async def summary(db, owner, days, timezone):
     legacy=await db('one','''SELECT coalesce(sum(input_tokens),0)::bigint AS "inputTokens",
         coalesce(sum(output_tokens),0)::bigint AS "outputTokens",coalesce(sum(calls),0)::bigint AS calls
         FROM llm_usage_baselines WHERE owner=%s''',(owner,))
-    return {'days':rows,'timezone':timezone,'periodDays':days,'allTime':{k:total[k]+legacy[k] for k in total},'legacy':legacy}
+    priced=await db('one',"""SELECT coalesce(sum(input_tokens),0)::bigint AS incoming,coalesce(sum(output_tokens),0)::bigint AS outgoing
+        FROM llm_usage_events WHERE owner=%s AND lower(model) IN ('gigachat/gigachat-3-pro','gigachat-3-pro')""",(owner,))
+    period_in=sum(x['priced_input'] for x in rows);period_out=sum(x['priced_output'] for x in rows)
+    for row in rows:
+        row['cost']=cost(row.pop('priced_input'),row.pop('priced_output'))
+    all_time={k:total[k]+legacy[k] for k in total}
+    return {'days':rows,'timezone':timezone,'periodDays':days,'allTime':all_time,'legacy':legacy,
+        'pricing':{'currency':'RUB','model':'GigaChat/GigaChat-3-Pro','inputPerMillion':float(INPUT_RATE),'outputPerMillion':float(OUTPUT_RATE),
+                   'period':cost(period_in,period_out),'allTime':cost(priced['incoming'],priced['outgoing']),
+                   'unpricedPeriodTokens':sum(x['inputTokens']+x['outputTokens'] for x in rows)-period_in-period_out,
+                   'unpricedAllTimeTokens':all_time['inputTokens']+all_time['outputTokens']-priced['incoming']-priced['outgoing']}}
